@@ -1,0 +1,19 @@
+{
+  "scope": "Fresh source-copy migration; not new physical performance qualification",
+  "source_commit": "20c83c18189b18d7898b615814bec0479eb981d4",
+  "workspace": "Assembled exclusively from the five fork migration manifests",
+  "source_files_verified_across_forks": 245,
+  "runtime_revision": "27c198dd51d9df1ffe681288039cbb6f038e62a8b235b08a39b06a21d3041d4f",
+  "native_patch_revision": "148b4295bf83c0eaa473b11fff5c7c643092f1873200cef1f52b07a2265861ed",
+  "historical_revision_match": true,
+  "commands_passed": [
+    "python3 -m hetero.cli --help",
+    "python3 -m admission_control.cli --help",
+    "python3 -m unittest tests.test_mechanism_cost.MechanismCostContracts.test_ordinary_continuation_without_top32_preserves_ownership_and_budget tests.test_mechanism_cost.MechanismCostContracts.test_fidelity_default_still_rejects_missing_prepared_diagnostics_and_cleans_up -q"
+  ],
+  "contract_tests_passed": 2,
+  "contract_scope": "Continuation ownership/budget and failed fidelity cleanup; no model or timing simulation",
+  "hardware_workloads_launched": false,
+  "legacy_simulators_executed": false,
+  "production_async_processor_modified": false
+}

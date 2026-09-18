@@ -1,0 +1,163 @@
+{
+  "model": "gemma-4-31b",
+  "model_path": "/models/gemma-4-31b",
+  "architecture": {
+    "hidden_size": 5376,
+    "intermediate_size": 21504,
+    "num_q_heads": 32,
+    "num_kv_heads": 16,
+    "head_dim": 128,
+    "num_layers": 48,
+    "weight_bytes_bf16": 61440000000.0,
+    "kv_bytes_per_token": 393216
+  },
+  "vllm_benchmark": {
+    "hardware": "Cloud TPU v5e (TP=8, 2x4 subslice)",
+    "tp_size": 8,
+    "batch_sizes": [
+      16,
+      32,
+      64,
+      128,
+      256
+    ],
+    "output_len": 64,
+    "num_iters": 3,
+    "fixed_prompt_len": 512,
+    "peak_tflops": 1576.0,
+    "stage_1_prefill": [
+      {
+        "batch_size": 16,
+        "total_prompt_tokens": 8192,
+        "latency_ms": 727.96,
+        "throughput_tok_s": 11253.4,
+        "mean_latency_ms": 743.15,
+        "std_latency_ms": 69.66,
+        "cv_latency_percent": 9.37,
+        "iter_latencies_ms": [835.05, 727.96, 666.45],
+        "iter_throughputs_tok_s": [9810.2, 11253.4, 12291.9]
+      },
+      {
+        "batch_size": 32,
+        "total_prompt_tokens": 16384,
+        "latency_ms": 1318.31,
+        "throughput_tok_s": 12428.1,
+        "mean_latency_ms": 1349.41,
+        "std_latency_ms": 71.96,
+        "cv_latency_percent": 5.33,
+        "iter_latencies_ms": [1318.31, 1448.87, 1281.04],
+        "iter_throughputs_tok_s": [12428.1, 11308.1, 12789.6]
+      },
+      {
+        "batch_size": 64,
+        "total_prompt_tokens": 32768,
+        "latency_ms": 2616.97,
+        "throughput_tok_s": 12521.3,
+        "mean_latency_ms": 2626.78,
+        "std_latency_ms": 13.92,
+        "cv_latency_percent": 0.53,
+        "iter_latencies_ms": [2616.91, 2616.97, 2646.46],
+        "iter_throughputs_tok_s": [12521.7, 12521.3, 12381.8]
+      },
+      {
+        "batch_size": 128,
+        "total_prompt_tokens": 65536,
+        "latency_ms": 5052.12,
+        "throughput_tok_s": 12972.0,
+        "mean_latency_ms": 5028.94,
+        "std_latency_ms": 46.79,
+        "cv_latency_percent": 0.93,
+        "iter_latencies_ms": [5052.12, 4963.68, 5071.02],
+        "iter_throughputs_tok_s": [12972.0, 13203.1, 12923.6]
+      },
+      {
+        "batch_size": 256,
+        "total_prompt_tokens": 131072,
+        "latency_ms": 9983.72,
+        "throughput_tok_s": 13128.6,
+        "mean_latency_ms": 9969.56,
+        "std_latency_ms": 72.23,
+        "cv_latency_percent": 0.72,
+        "iter_latencies_ms": [9983.72, 9874.88, 10050.09],
+        "iter_throughputs_tok_s": [13128.6, 13273.3, 13041.9]
+      }
+    ],
+    "stage_2_decode": [
+      {
+        "batch_size": 16,
+        "gen_tokens": 1024,
+        "e2e_latency_ms": 1794.95,
+        "est_prefill_latency_ms": 727.96,
+        "decode_latency_ms": 1066.99,
+        "tpot_ms": 16.67,
+        "decode_tok_s": 959.7,
+        "mean_tpot_ms": 16.13,
+        "std_tpot_ms": 1.58,
+        "cv_tpot_percent": 9.8,
+        "iter_e2e_latencies_ms": [1794.95, 1622.78, 1863.27],
+        "iter_tpots_ms": [16.67, 13.98, 17.74],
+        "iter_decode_tputs_tok_s": [959.7, 1144.4, 902.0]
+      },
+      {
+        "batch_size": 32,
+        "gen_tokens": 2048,
+        "e2e_latency_ms": 3380.88,
+        "est_prefill_latency_ms": 1318.31,
+        "decode_latency_ms": 2062.57,
+        "tpot_ms": 33.23,
+        "decode_tok_s": 962.9,
+        "mean_tpot_ms": 32.61,
+        "std_tpot_ms": 1.48,
+        "cv_tpot_percent": 4.54,
+        "iter_e2e_latencies_ms": [3380.88, 3274.4, 3495.77],
+        "iter_tpots_ms": [33.23, 30.56, 34.02],
+        "iter_decode_tputs_tok_s": [962.9, 1047.0, 940.5]
+      },
+      {
+        "batch_size": 64,
+        "gen_tokens": 4096,
+        "e2e_latency_ms": 5031.07,
+        "est_prefill_latency_ms": 2616.97,
+        "decode_latency_ms": 2414.1,
+        "tpot_ms": 37.72,
+        "decode_tok_s": 1696.7,
+        "mean_tpot_ms": 37.44,
+        "std_tpot_ms": 1.25,
+        "cv_tpot_percent": 3.34,
+        "iter_e2e_latencies_ms": [5101.09, 5031.07, 4872.91],
+        "iter_tpots_ms": [38.81, 37.72, 35.79],
+        "iter_decode_tputs_tok_s": [1648.9, 1696.7, 1788.2]
+      },
+      {
+        "batch_size": 128,
+        "gen_tokens": 8192,
+        "e2e_latency_ms": 9968.55,
+        "est_prefill_latency_ms": 5052.12,
+        "decode_latency_ms": 4916.43,
+        "tpot_ms": 76.82,
+        "decode_tok_s": 1666.2,
+        "mean_tpot_ms": 77.18,
+        "std_tpot_ms": 0.51,
+        "cv_tpot_percent": 0.66,
+        "iter_e2e_latencies_ms": [9999.55, 9968.55, 9968.48],
+        "iter_tpots_ms": [77.89, 76.82, 76.82],
+        "iter_decode_tputs_tok_s": [1643.3, 1666.2, 1666.3]
+      },
+      {
+        "batch_size": 256,
+        "gen_tokens": 16322,
+        "e2e_latency_ms": 19687.61,
+        "est_prefill_latency_ms": 9983.72,
+        "decode_latency_ms": 9703.89,
+        "tpot_ms": 151.88,
+        "decode_tok_s": 1685.5,
+        "mean_tpot_ms": 148.45,
+        "std_tpot_ms": 5.15,
+        "cv_tpot_percent": 3.47,
+        "iter_e2e_latencies_ms": [19693.94, 19687.61, 18953.03],
+        "iter_tpots_ms": [152.30, 151.88, 141.17],
+        "iter_decode_tputs_tok_s": [1680.9, 1685.5, 1813.4]
+      }
+    ]
+  }
+}

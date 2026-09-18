@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gemma-4 31B Cloud TPU v5e Benchmark & Profiling Report</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Mono:wght@400;500&family=Google+Sans+Text:wght@400;500&display=swap');
+
+body {
+    font-family: "Google Sans Text", "Google Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    color: #3c4043;
+    background-color: #ffffff;
+    max-width: 720px;
+    margin: 24px auto;
+    padding: 0 16px;
+}
+
+/* Headings */
+h1 {
+    font-family: "Google Sans", sans-serif;
+    font-size: 26px;
+    font-weight: 500;
+    color: #1a73e8; /* Google Blue */
+    margin-top: 36px;
+    margin-bottom: 8px;
+    line-height: 1.25;
+    letter-spacing: -0.2px;
+}
+
+h2 {
+    font-family: "Google Sans", sans-serif;
+    font-size: 18px;
+    font-weight: 400;
+    color: #5f6368;
+    margin-top: 4px;
+    margin-bottom: 24px;
+    line-height: 1.4;
+}
+
+h3 {
+    font-family: "Google Sans", sans-serif;
+    font-size: 18px;
+    font-weight: 500;
+    color: #202124;
+    margin-top: 32px;
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #e8eaed;
+}
+
+h4 {
+    font-family: "Google Sans", sans-serif;
+    font-size: 15px;
+    font-weight: 500;
+    color: #202124;
+    margin-top: 20px;
+    margin-bottom: 8px;
+}
+
+p {
+    margin-top: 0;
+    margin-bottom: 12px;
+    color: #3c4043;
+}
+
+/* Tables - Google Docs Material Style */
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 14px 0 20px 0;
+    font-size: 12.5px;
+    border: 1px solid #dadce0;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+th {
+    background-color: #f8f9fa;
+    color: #202124;
+    font-family: "Google Sans", sans-serif;
+    font-weight: 500;
+    text-align: left;
+    padding: 7px 9px;
+    border: 1px solid #dadce0;
+    border-bottom: 2px solid #dadce0;
+}
+
+td {
+    padding: 6px 9px;
+    border: 1px solid #dadce0;
+    color: #3c4043;
+    vertical-align: top;
+}
+
+tr:nth-child(even) {
+    background-color: #fcfdfe;
+}
+
+tr:hover {
+    background-color: #f1f3f4;
+}
+
+/* Lists */
+ul, ol {
+    margin-top: 4px;
+    margin-bottom: 14px;
+    padding-left: 24px;
+}
+
+li {
+    margin-bottom: 6px;
+    color: #3c4043;
+}
+
+/* Images / Charts */
+img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 20px auto;
+    border: 1px solid #e8eaed;
+    border-radius: 8px;
+    box-shadow: 0 1px 2px 0 rgba(60,64,67,0.15), 0 1px 3px 1px rgba(60,64,67,0.08);
+}
+
+/* Inline Code & Code Blocks */
+code {
+    font-family: "Google Sans Mono", "Roboto Mono", monospace;
+    font-size: 13px;
+    background-color: #f1f3f4;
+    color: #1967d2; /* Google Dark Blue */
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+pre {
+    background-color: #f8f9fa;
+    border: 1px solid #dadce0;
+    border-left: 4px solid #1a73e8;
+    border-radius: 6px;
+    padding: 14px;
+    overflow-x: auto;
+    margin: 16px 0;
+}
+
+pre code {
+    background-color: transparent;
+    color: #202124;
+    padding: 0;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+strong, b {
+    color: #202124;
+    font-weight: 500;
+}
+</style>
+</head>
+<body>
+<h1 id="gemma-4-31b-inference-benchmark-on-cloud-tpu-v5e-topology-2x4-tp8">Gemma-4 31B Inference Benchmark on Cloud TPU v5e Topology 2x4 (TP=8)</h1>
+<h2 id="prefill-decode-multi-step-serving-performance-analysis-vs-full-cluster-4x4-tp16">Prefill, Decode &amp; Multi-Step Serving Performance Analysis vs. Full Cluster (4x4, TP=16)</h2>
+<h3 id="1-executive-summary-overview">1. Executive Summary &amp; Overview</h3>
+<p>This report provides the performance benchmark results for <strong>Gemma-4 31B</strong> (48 layers, hidden dimension 5,376, FFN intermediate dimension 21,504, 32 Q heads, 16 KV heads) running on a <strong>Cloud TPU v5e Topology 2x4</strong> (2 hosts, 8 chips, <code>TPU_TOPOLOGY="2x4"</code>, Tensor Parallelism <code>TP=8</code>).</p>
+<p>The experiment was submitted and orchestrated using the official <strong>Ray SDK</strong> (<code>JobSubmissionClient</code> connecting to the KubeRay TPU cluster on GKE).</p>
+<p>Key findings:
+1. <strong>Prefill Throughput Advantage (+49.1% over TP=16)</strong>:
+   - Due to lower cross-host collective networking hops on the 2-host subslice (compared to the 4-host torus in TP=16), 48-layer step latency at $N=16,384$ tokens is compressed from <strong>1,209.0 ms (TP=16)</strong> down to <strong>810.8 ms (TP=8)</strong>.
+   - This delivers a peak prompt throughput of <strong>20,206.4 prompt tok/s</strong> per 2x4 slice (50.82% Compute MFU), outperforming the 13,551.0 prompt tok/s achieved under TP=16.
+2. <strong>Decode Concurrency &amp; Multi-Step Saturation</strong>:
+   - Single-step decode latency scales from <strong>22.36 ms</strong> (BS=4) to <strong>28.88 ms</strong> (BS=64) and <strong>54.66 ms</strong> (BS=256), scaling up to <strong>5,422.8 tok/s</strong> at BS=512.
+   - In continuous multi-step generation (10 decode steps), generation throughput scales from <strong>170.6 gen tok/s</strong> at BS=1 (TPOT = 5.86 ms/tok) up to <strong>6,587.2 gen tok/s</strong> at BS=256 (TPOT = 38.86 ms/tok).
+3. <strong>Long Context Scalability (BS=64)</strong>:
+   - Scaling context length from 128 to 4,096 tokens (up to 96 GB aggregate KV cache footprint) maintains steady step times (~28.7 to 29.5 ms) and ~2,200 tok/s decode throughput.</p>
+<hr />
+<h3 id="2-experimental-setup-cluster-topology">2. Experimental Setup &amp; Cluster Topology</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Specification</th>
+<th style="text-align: left;">Cloud TPU v5e (2x4 Topology)</th>
+<th style="text-align: left;">Cloud TPU v5e (4x4 Topology - Baseline)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Physical Nodes</strong></td>
+<td style="text-align: left;">2 hosts (<code>ct5lp-hightpu-4t</code>)</td>
+<td style="text-align: left;">4 hosts (<code>ct5lp-hightpu-4t</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Total TPU Chips</strong></td>
+<td style="text-align: left;">8 TPU v5e chips</td>
+<td style="text-align: left;">16 TPU v5e chips</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Mesh Topology</strong></td>
+<td style="text-align: left;"><code>2 × 4 2D Mesh</code> (2-Host ICI Ring)</td>
+<td style="text-align: left;"><code>4 × 4 2D Torus</code> (4-Host ICI Torus)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Peak FLOPs</strong></td>
+<td style="text-align: left;"><strong>1,576 TFLOPS</strong> BF16</td>
+<td style="text-align: left;">3,152 TFLOPS BF16</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Total HBM Memory</strong></td>
+<td style="text-align: left;"><strong>128 GB</strong> (16 GB / chip)</td>
+<td style="text-align: left;">256 GB (16 GB / chip)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Model</strong></td>
+<td style="text-align: left;">Gemma-4 31B (48 layers, D=5376, FFN=21504)</td>
+<td style="text-align: left;">Gemma-4 31B</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Parallelism</strong></td>
+<td style="text-align: left;"><strong>Tensor Parallel TP = 8</strong></td>
+<td style="text-align: left;">Tensor Parallel TP = 16</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Orchestration</strong></td>
+<td style="text-align: left;">Ray SDK / KubeRay Job Submission</td>
+<td style="text-align: left;">Ray SDK / KubeRay Job Submission</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="3-prefill-performance-token-bucket-scaling-sweep">3. Prefill Performance: Token Bucket Scaling Sweep</h3>
+<p>Measured across token batch buckets $N = 64$ to $16,384$ tokens ($N = \text{Batch Size} \times \text{Prompt Length}$):</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Tokens ($N$)</th>
+<th style="text-align: left;">QKV + O-Proj</th>
+<th style="text-align: left;">SwiGLU FFN</th>
+<th style="text-align: left;">Layer Latency</th>
+<th style="text-align: left;">48-Layer Step</th>
+<th style="text-align: left;">Prompt Throughput</th>
+<th style="text-align: left;">Compute MFU (%)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>N = 64</strong></td>
+<td style="text-align: left;">0.393 ms</td>
+<td style="text-align: left;">0.458 ms</td>
+<td style="text-align: left;">0.851 ms</td>
+<td style="text-align: left;"><strong>40.85 ms</strong></td>
+<td style="text-align: left;">1,566.6 tok/s</td>
+<td style="text-align: left;">3.94%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>N = 128</strong></td>
+<td style="text-align: left;">0.440 ms</td>
+<td style="text-align: left;">0.476 ms</td>
+<td style="text-align: left;">0.916 ms</td>
+<td style="text-align: left;"><strong>43.97 ms</strong></td>
+<td style="text-align: left;">2,911.2 tok/s</td>
+<td style="text-align: left;">7.32%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>N = 256</strong></td>
+<td style="text-align: left;">0.478 ms</td>
+<td style="text-align: left;">0.587 ms</td>
+<td style="text-align: left;">1.065 ms</td>
+<td style="text-align: left;"><strong>51.11 ms</strong></td>
+<td style="text-align: left;">5,009.2 tok/s</td>
+<td style="text-align: left;">12.60%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>N = 512</strong></td>
+<td style="text-align: left;">0.535 ms</td>
+<td style="text-align: left;">0.736 ms</td>
+<td style="text-align: left;">1.272 ms</td>
+<td style="text-align: left;"><strong>61.04 ms</strong></td>
+<td style="text-align: left;">8,388.2 tok/s</td>
+<td style="text-align: left;">21.10%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>N = 1,024</strong></td>
+<td style="text-align: left;">0.671 ms</td>
+<td style="text-align: left;">1.086 ms</td>
+<td style="text-align: left;">1.757 ms</td>
+<td style="text-align: left;"><strong>84.36 ms</strong></td>
+<td style="text-align: left;">12,139.2 tok/s</td>
+<td style="text-align: left;">30.53%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>N = 2,048</strong></td>
+<td style="text-align: left;">0.964 ms</td>
+<td style="text-align: left;">1.795 ms</td>
+<td style="text-align: left;">2.759 ms</td>
+<td style="text-align: left;"><strong>132.41 ms</strong></td>
+<td style="text-align: left;">15,466.8 tok/s</td>
+<td style="text-align: left;">38.90%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>N = 4,096</strong></td>
+<td style="text-align: left;">1.520 ms</td>
+<td style="text-align: left;">3.293 ms</td>
+<td style="text-align: left;">4.813 ms</td>
+<td style="text-align: left;"><strong>231.01 ms</strong></td>
+<td style="text-align: left;">17,731.1 tok/s</td>
+<td style="text-align: left;">44.59%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>N = 8,192</strong></td>
+<td style="text-align: left;">2.731 ms</td>
+<td style="text-align: left;">6.129 ms</td>
+<td style="text-align: left;">8.860 ms</td>
+<td style="text-align: left;"><strong>425.28 ms</strong></td>
+<td style="text-align: left;">19,262.6 tok/s</td>
+<td style="text-align: left;">48.44%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>N = 16,384</strong></td>
+<td style="text-align: left;">4.964 ms</td>
+<td style="text-align: left;">11.929 ms</td>
+<td style="text-align: left;">16.892 ms</td>
+<td style="text-align: left;"><strong>810.83 ms</strong></td>
+<td style="text-align: left;"><strong>20,206.4 tok/s</strong></td>
+<td style="text-align: left;"><strong>50.82%</strong></td>
+</tr>
+</tbody>
+</table>
+<h4 id="prefill-batch-size-concurrency-sweep-context-length-512">Prefill Batch Size Concurrency Sweep (Context Length = 512)</h4>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Batch Size</th>
+<th style="text-align: left;">Prompt Tokens ($N$)</th>
+<th style="text-align: left;">48L Step Latency</th>
+<th style="text-align: left;">Prompt Throughput</th>
+<th style="text-align: left;">TTFT</th>
+<th style="text-align: left;">Compute MFU (%)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>BS = 1</strong></td>
+<td style="text-align: left;">512</td>
+<td style="text-align: left;">44.95 ms</td>
+<td style="text-align: left;">11,390.8 tok/s</td>
+<td style="text-align: left;">44.95 ms</td>
+<td style="text-align: left;">28.65%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 2</strong></td>
+<td style="text-align: left;">1,024</td>
+<td style="text-align: left;">69.26 ms</td>
+<td style="text-align: left;">14,785.0 tok/s</td>
+<td style="text-align: left;">69.26 ms</td>
+<td style="text-align: left;">37.18%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 4</strong></td>
+<td style="text-align: left;">2,048</td>
+<td style="text-align: left;">125.39 ms</td>
+<td style="text-align: left;">16,332.8 tok/s</td>
+<td style="text-align: left;">125.39 ms</td>
+<td style="text-align: left;">41.08%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 8</strong></td>
+<td style="text-align: left;">4,096</td>
+<td style="text-align: left;">236.07 ms</td>
+<td style="text-align: left;">17,350.9 tok/s</td>
+<td style="text-align: left;">236.07 ms</td>
+<td style="text-align: left;">43.64%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 16</strong></td>
+<td style="text-align: left;">8,192</td>
+<td style="text-align: left;">457.37 ms</td>
+<td style="text-align: left;">17,911.1 tok/s</td>
+<td style="text-align: left;">457.37 ms</td>
+<td style="text-align: left;">45.05%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 32</strong></td>
+<td style="text-align: left;">16,384</td>
+<td style="text-align: left;">867.17 ms</td>
+<td style="text-align: left;"><strong>18,893.7 tok/s</strong></td>
+<td style="text-align: left;">867.17 ms</td>
+<td style="text-align: left;"><strong>47.52%</strong></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="4-decode-performance-single-step-concurrency-sweep">4. Decode Performance: Single-Step &amp; Concurrency Sweep</h3>
+<p>Measured with context length $S = 512$ tokens across batch sizes $BS = 1$ to $512$:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Batch Size</th>
+<th style="text-align: left;">Single-Step Latency</th>
+<th style="text-align: left;">Pure Decode Tok/s</th>
+<th style="text-align: left;">TPOT (Single-Step)</th>
+<th style="text-align: left;">KV Cache Volume</th>
+<th style="text-align: left;">Decode MFU (%)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>BS = 1</strong></td>
+<td style="text-align: left;">27.03 ms</td>
+<td style="text-align: left;">37.0 tok/s</td>
+<td style="text-align: left;">27.03 ms</td>
+<td style="text-align: left;">0.19 GB</td>
+<td style="text-align: left;">0.09%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 4</strong></td>
+<td style="text-align: left;">22.36 ms</td>
+<td style="text-align: left;">178.9 tok/s</td>
+<td style="text-align: left;">22.36 ms</td>
+<td style="text-align: left;">0.75 GB</td>
+<td style="text-align: left;">0.45%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 16</strong></td>
+<td style="text-align: left;">24.14 ms</td>
+<td style="text-align: left;">662.9 tok/s</td>
+<td style="text-align: left;">24.14 ms</td>
+<td style="text-align: left;">3.00 GB</td>
+<td style="text-align: left;">1.67%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 32</strong></td>
+<td style="text-align: left;">24.98 ms</td>
+<td style="text-align: left;">1,281.0 tok/s</td>
+<td style="text-align: left;">24.98 ms</td>
+<td style="text-align: left;">6.00 GB</td>
+<td style="text-align: left;">3.22%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 64</strong></td>
+<td style="text-align: left;">28.88 ms</td>
+<td style="text-align: left;"><strong>2,216.4 tok/s</strong></td>
+<td style="text-align: left;">28.88 ms</td>
+<td style="text-align: left;">12.00 GB</td>
+<td style="text-align: left;">5.57%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 128</strong></td>
+<td style="text-align: left;">37.38 ms</td>
+<td style="text-align: left;"><strong>3,424.4 tok/s</strong></td>
+<td style="text-align: left;">37.38 ms</td>
+<td style="text-align: left;">24.00 GB</td>
+<td style="text-align: left;">8.61%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 256</strong></td>
+<td style="text-align: left;">54.66 ms</td>
+<td style="text-align: left;"><strong>4,683.8 tok/s</strong></td>
+<td style="text-align: left;">54.66 ms</td>
+<td style="text-align: left;">48.00 GB</td>
+<td style="text-align: left;">11.78%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 512</strong></td>
+<td style="text-align: left;">94.42 ms</td>
+<td style="text-align: left;"><strong>5,422.8 tok/s</strong></td>
+<td style="text-align: left;">94.42 ms</td>
+<td style="text-align: left;">96.00 GB</td>
+<td style="text-align: left;"><strong>13.64%</strong></td>
+</tr>
+</tbody>
+</table>
+<h4 id="long-context-scaling-at-fixed-concurrency-bs-64">Long Context Scaling at Fixed Concurrency (BS = 64)</h4>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Context Length</th>
+<th style="text-align: left;">Step Latency</th>
+<th style="text-align: left;">Decode Throughput</th>
+<th style="text-align: left;">TPOT</th>
+<th style="text-align: left;">Aggregate KV Cache</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>128</strong></td>
+<td style="text-align: left;">25.88 ms</td>
+<td style="text-align: left;">2,472.7 tok/s</td>
+<td style="text-align: left;">25.88 ms</td>
+<td style="text-align: left;">3.00 GB</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>512</strong></td>
+<td style="text-align: left;">28.95 ms</td>
+<td style="text-align: left;">2,210.5 tok/s</td>
+<td style="text-align: left;">28.95 ms</td>
+<td style="text-align: left;">12.00 GB</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>1,024</strong></td>
+<td style="text-align: left;">29.38 ms</td>
+<td style="text-align: left;">2,178.7 tok/s</td>
+<td style="text-align: left;">29.38 ms</td>
+<td style="text-align: left;">24.00 GB</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>2,048</strong></td>
+<td style="text-align: left;">29.55 ms</td>
+<td style="text-align: left;">2,165.8 tok/s</td>
+<td style="text-align: left;">29.55 ms</td>
+<td style="text-align: left;">48.00 GB</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>4,096</strong></td>
+<td style="text-align: left;">28.71 ms</td>
+<td style="text-align: left;">2,228.9 tok/s</td>
+<td style="text-align: left;">28.71 ms</td>
+<td style="text-align: left;">96.00 GB</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="5-continuous-multi-step-generation-10-tokens-context-512">5. Continuous Multi-Step Generation (10 Tokens, Context = 512)</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Batch Size</th>
+<th style="text-align: left;">Total 10-Step Time</th>
+<th style="text-align: left;">Generation Tok/s</th>
+<th style="text-align: left;">TPOT (ms/tok)</th>
+<th style="text-align: left;">Generation MFU (%)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>BS = 1</strong></td>
+<td style="text-align: left;">0.059 s</td>
+<td style="text-align: left;">170.6 tok/s</td>
+<td style="text-align: left;"><strong>5.86 ms</strong></td>
+<td style="text-align: left;">0.43%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 4</strong></td>
+<td style="text-align: left;">0.054 s</td>
+<td style="text-align: left;">738.5 tok/s</td>
+<td style="text-align: left;"><strong>5.42 ms</strong></td>
+<td style="text-align: left;">1.86%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 16</strong></td>
+<td style="text-align: left;">0.059 s</td>
+<td style="text-align: left;">2,712.9 tok/s</td>
+<td style="text-align: left;"><strong>5.90 ms</strong></td>
+<td style="text-align: left;">6.82%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 32</strong></td>
+<td style="text-align: left;">0.075 s</td>
+<td style="text-align: left;">4,268.9 tok/s</td>
+<td style="text-align: left;"><strong>7.50 ms</strong></td>
+<td style="text-align: left;">10.74%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 64</strong></td>
+<td style="text-align: left;">0.126 s</td>
+<td style="text-align: left;"><strong>5,086.4 tok/s</strong></td>
+<td style="text-align: left;"><strong>12.58 ms</strong></td>
+<td style="text-align: left;">12.79%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 128</strong></td>
+<td style="text-align: left;">0.212 s</td>
+<td style="text-align: left;"><strong>6,046.0 tok/s</strong></td>
+<td style="text-align: left;"><strong>21.17 ms</strong></td>
+<td style="text-align: left;">15.21%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BS = 256</strong></td>
+<td style="text-align: left;">0.389 s</td>
+<td style="text-align: left;"><strong>6,587.2 tok/s</strong></td>
+<td style="text-align: left;"><strong>38.86 ms</strong></td>
+<td style="text-align: left;"><strong>16.57%</strong></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="6-direct-cross-topology-comparison-topology-2x4-tp8-vs-topology-4x4-tp16">6. Direct Cross-Topology Comparison: Topology 2x4 (TP=8) vs Topology 4x4 (TP=16)</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Metric / Regime</th>
+<th style="text-align: left;">Topology 2x4 (TP=8, 8 Chips)</th>
+<th style="text-align: left;">Topology 4x4 (TP=16, 16 Chips)</th>
+<th style="text-align: left;">Comparison &amp; Engineering Takeaway</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Peak Prefill Throughput ($N=16,384$)</strong></td>
+<td style="text-align: left;"><strong>20,206 tok/s</strong></td>
+<td style="text-align: left;">13,551 tok/s</td>
+<td style="text-align: left;"><strong>+49.1% higher on TP=8</strong> (Lower cross-host optical hop overhead)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Prefill Layer Latency ($N=16,384$)</strong></td>
+<td style="text-align: left;"><strong>16.89 ms</strong></td>
+<td style="text-align: left;">25.19 ms</td>
+<td style="text-align: left;"><strong>32.9% faster per layer</strong> on TP=8</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Prefill Compute MFU ($N=16,384$)</strong></td>
+<td style="text-align: left;"><strong>50.82%</strong> (of 1,576 TF)</td>
+<td style="text-align: left;">68.20% (of 3,152 TF)</td>
+<td style="text-align: left;">TP=8 achieves higher raw throughput per slice</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Interactive Decode Latency (BS=1)</strong></td>
+<td style="text-align: left;">27.03 ms (5.86 ms multi-step)</td>
+<td style="text-align: left;">8.12 ms (8.43 ms E2E)</td>
+<td style="text-align: left;">TP=16 has lower single-step latency due to 16-way sharded GEMM</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Decode Throughput (BS=64)</strong></td>
+<td style="text-align: left;"><strong>2,216 tok/s</strong> (5,086 tok/s multi)</td>
+<td style="text-align: left;">2,220 tok/s</td>
+<td style="text-align: left;">Identical throughput due to HBM bandwidth bottleneck</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Decode Throughput (BS=256)</strong></td>
+<td style="text-align: left;"><strong>4,684 tok/s</strong> (6,587 tok/s multi)</td>
+<td style="text-align: left;">2,659 tok/s</td>
+<td style="text-align: left;">TP=8 maintains scaling deeper into large batch sizes</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Optimal Deployment Strategy</strong></td>
+<td style="text-align: left;"><strong>Prefill-dominant &amp; Disaggregated Pools</strong></td>
+<td style="text-align: left;"><strong>Low-latency Interactive Decode</strong></td>
+<td style="text-align: left;">Topology 2x4 is optimal for high-throughput prompt processing</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="7-summary-conclusions-recommendations">7. Summary Conclusions &amp; Recommendations</h3>
+<ol>
+<li><strong>Topology 2x4 (TP=8) is Compute- &amp; Communication-Optimal for Prefill</strong>:
+   - In Gemma-4 31B, TP=8 provides twice the tensor dimension per chip ($d_{\text{local}} = 5376 / 8 = 672$) compared to TP=16 ($d_{\text{local}} = 336$), achieving higher GEMM matrix intensity.
+   - Reducing the ICI ring from 4 hosts to 2 hosts cuts AllReduce ring synchronization overhead, delivering <strong>20,206 prompt tok/s</strong> per slice.</li>
+<li><strong>Decode Phase Saturation Dynamics</strong>:
+   - For batch sizes $BS \le 32$, Decode latency is dominated by weight streaming and kernel launch overheads.
+   - For $BS \ge 64$, KV cache retrieval from HBM becomes the active constraint.</li>
+<li><strong>Disaggregated Serving Architecture</strong>:
+   - Deploying 2x4 (TP=8) slices for Prefill workers and 4x4 (TP=16) slices for interactive Decode workers provides the best cost-to-throughput ratio.</li>
+</ol>
+</body>
+</html>

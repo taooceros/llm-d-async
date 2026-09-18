@@ -1,5 +1,32 @@
 # Async Processor (AP) - User Guide
 
+## Fork-only heterogeneous TPU workload research
+
+`experimental/heterogeneous-serving/` contains the copied ShareGPT workload
+and manifest tools, frozen experiment drivers, and earlier scheduling research.
+This is a research source migration, **not** a new production Redis/PubSub
+dispatch gate or a replacement for the Async Processor below.
+
+The sources remain coordinated with the `vllm`, `tpu-inference`, `llm-d-router`
+and `llm-d` forks under `taooceros`, on branch
+`research/heterogeneous-tpu-20260918`. With sibling checkouts, run:
+
+```bash
+python3 ../llm-d/experimental/heterogeneous-serving/assemble.py --output /tmp/hetero-research
+cd /tmp/hetero-research
+python3 -m hetero.cli --help
+```
+
+`migration.json` records exact original paths, byte counts and SHA256 hashes;
+assembly validates them before copying. Python3.12+ and the research control
+dependencies in the llm-d fork are required. No source history was replayed.
+The original full results and workload inputs are in the
+[llm-d research release](https://github.com/taooceros/llm-d/releases/tag/research-evidence-20260918),
+with compact summaries and checksums committed there. The102-run physical
+campaign made zero end-to-end migration proposals; it does not establish a
+migration speedup. Older simulator code is retained for history, not benchmark
+ground truth, and was not executed during migration.
+
 ## Overview
 **The Problem:** High-performance accelerators often suffer from low utilization in strictly online serving scenarios, or users may need to mix latency-insensitive workloads into slack capacity without impacting primary online serving.
 

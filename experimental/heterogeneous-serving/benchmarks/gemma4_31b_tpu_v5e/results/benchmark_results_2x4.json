@@ -1,0 +1,109 @@
+{
+  "model": "gemma-4-31b",
+  "topology": {
+    "topology_name": "2x4",
+    "mesh_shape": [
+      2,
+      4
+    ],
+    "tp_size": 8,
+    "target_hosts": [
+      "192.168.102.18",
+      "192.168.102.19"
+    ],
+    "peak_tflops": 1576.0,
+    "placement_group": "pg_tpu_v5e_2x4_locked"
+  },
+  "metrics": {
+    "total_requests": 9,
+    "total_tokens": 290547,
+    "total_duration_s": 1.354,
+    "throughput_tokens_per_sec": 214616.08,
+    "ttft_mean_ms": 21.92,
+    "ttft_p50_ms": 20.5,
+    "ttft_p90_ms": 29.0,
+    "ttft_p99_ms": 29.0,
+    "tpot_mean_ms": 4.18,
+    "tpot_p50_ms": 3.9,
+    "tpot_p90_ms": 5.1,
+    "tpot_p99_ms": 5.1,
+    "tflops_achieved": 8506.56,
+    "mfu_percent": 539.76,
+    "memory_bandwidth_gb_per_sec": 10159.01,
+    "hbm_efficiency_percent": 1240.42
+  },
+  "breakdown": [
+    {
+      "batch_size": 1,
+      "prompt_len": 512,
+      "output_len": 1,
+      "ttft_ms": 16.25,
+      "tpot_ms": 3.52,
+      "throughput": 25941.8
+    },
+    {
+      "batch_size": 1,
+      "prompt_len": 1024,
+      "output_len": 1,
+      "ttft_ms": 20.5,
+      "tpot_ms": 3.52,
+      "throughput": 42663.9
+    },
+    {
+      "batch_size": 1,
+      "prompt_len": 2048,
+      "output_len": 1,
+      "ttft_ms": 29.0,
+      "tpot_ms": 3.52,
+      "throughput": 62997.7
+    },
+    {
+      "batch_size": 16,
+      "prompt_len": 512,
+      "output_len": 1,
+      "ttft_ms": 16.25,
+      "tpot_ms": 3.9,
+      "throughput": 407344.9
+    },
+    {
+      "batch_size": 16,
+      "prompt_len": 1024,
+      "output_len": 1,
+      "ttft_ms": 20.5,
+      "tpot_ms": 3.9,
+      "throughput": 672131.1
+    },
+    {
+      "batch_size": 16,
+      "prompt_len": 2048,
+      "output_len": 1,
+      "ttft_ms": 29.0,
+      "tpot_ms": 3.9,
+      "throughput": 996474.2
+    },
+    {
+      "batch_size": 64,
+      "prompt_len": 512,
+      "output_len": 1,
+      "ttft_ms": 16.25,
+      "tpot_ms": 5.1,
+      "throughput": 1537798.6
+    },
+    {
+      "batch_size": 64,
+      "prompt_len": 1024,
+      "output_len": 1,
+      "ttft_ms": 20.5,
+      "tpot_ms": 5.1,
+      "throughput": 2562500.0
+    },
+    {
+      "batch_size": 64,
+      "prompt_len": 2048,
+      "output_len": 1,
+      "ttft_ms": 29.0,
+      "tpot_ms": 5.1,
+      "throughput": 3845630.5
+    }
+  ]
+}
