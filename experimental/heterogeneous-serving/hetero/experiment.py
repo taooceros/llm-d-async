@@ -361,10 +361,25 @@ def run_arm(
     timeout_s: float = 7200.0,
     policy_overrides: Optional[Dict[str, Any]] = None,
     protocol_path: Optional[str] = None,
+    pilot_policy: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    """Timed arm. pilot_policy selects an UNFROZEN pilot: no cohort binding, an
+    explicit policy amendment over BASE_POLICY, and output never eligible as
+    cohort or headline evidence."""
     from .gateway.lifecycle import find_gateway
 
-    cohort = _frozen_cohort(protocol_path, arm)
+    pilot = pilot_policy is not None
+    if pilot:
+        unknown = set(pilot_policy) - set(BASE_POLICY)
+        if unknown:
+            raise ValueError(f"pilot policy may only amend BASE_POLICY fields: {sorted(unknown)}")
+        cohort = {"unfrozen_pilot": True, "pilot_policy": dict(pilot_policy),
+                  "evidence_scope": "UNFROZEN pilot; never cohort or headline evidence"}
+    else:
+        cohort = _frozen_cohort(protocol_path, arm)
+
+    def runtime(observed: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        return None if pilot else _loaded_runtime(observed, cohort["qualified_runtime"])
 
     if arm not in ARMS:
         raise KeyError(f"unknown arm {arm}; known: {sorted(ARMS)}")
@@ -384,6 +399,7 @@ def run_arm(
     roles = _instance_roles(deployed_layout, instances)
 
     policy = dict(BASE_POLICY)
+    policy.update(pilot_policy or {})
     policy.update(roles)
     policy["migration_enabled"] = spec["migration_enabled"]
     policy["migration_mechanism"] = spec["migration_mechanism"]
@@ -399,13 +415,14 @@ def run_arm(
     if candidate_policy != declared_policy:
         raise ValueError("policy_overrides cannot change the frozen BASE_POLICY/arm semantics")
     manifest = load_manifest(workload)
-    frozen_manifest = next((m for m in cohort["frozen_manifests"]
-                            if m["path"] == f"data/manifests/{workload}.json"), None)
-    if (frozen_manifest is None
-            or manifest["manifest_sha256"] != frozen_manifest["manifest_sha256"]
-            or manifest["model"] != cohort["qualified_runtime"]["engine_settings"]["model"]):
-        raise ValueError("selected workload is not part of the qualified frozen configuration")
-    loaded_runtime = _loaded_runtime(status, cohort["qualified_runtime"])
+    if not pilot:
+        frozen_manifest = next((m for m in cohort["frozen_manifests"]
+                                if m["path"] == f"data/manifests/{workload}.json"), None)
+        if (frozen_manifest is None
+                or manifest["manifest_sha256"] != frozen_manifest["manifest_sha256"]
+                or manifest["model"] != cohort["qualified_runtime"]["engine_settings"]["model"]):
+            raise ValueError("selected workload is not part of the qualified frozen configuration")
+    loaded_runtime = runtime(status)
     applied = ray.get(gateway.set_policy.remote(declared_policy), timeout=60)
     if RoutingPolicy.from_dict(applied).to_dict() != declared_policy:
         raise RuntimeError("gateway applied policy differs from the frozen arm")
@@ -417,7 +434,7 @@ def run_arm(
     from .workload import load_catalogue
 
     catalogue = load_catalogue("large")
-    if catalogue["sha256"] != manifest["catalogue_sha256"]:
+    if catalogue["sha256"] != manifest["catalogue_sha256"] and not pilot:
         raise ValueError("warmup catalogue differs from frozen workload provenance")
     excluded = {row["source_id"] for name in ("W0", "W1", "W2", "E_SHORT", "E_LONG")
                 for row in load_manifest(name)["requests"]}
@@ -445,7 +462,7 @@ def run_arm(
     idle_before = ray.get(gateway.await_idle_instances.remote(300.0), timeout=360)
 
     warmup_status = ray.get(gateway.status.remote(), timeout=120)
-    if (_loaded_runtime(warmup_status, cohort["qualified_runtime"]) != loaded_runtime
+    if (runtime(warmup_status) != loaded_runtime
             or RoutingPolicy.from_dict(warmup_status["core"]["config"]["policy"]).to_dict() != declared_policy):
         raise RuntimeError("qualified runtime or frozen policy changed before warmup")
     emit_event("ARM_WARMUP", arm=arm, requests=len(warmup_payload))
@@ -472,7 +489,7 @@ def run_arm(
     ray.get(gateway.await_idle_instances.remote(300.0), timeout=360)
     ray.get(gateway.reset_records.remote(), timeout=120)
     capture_status = ray.get(gateway.status.remote(), timeout=120)
-    if (_loaded_runtime(capture_status, cohort["qualified_runtime"]) != loaded_runtime
+    if (runtime(capture_status) != loaded_runtime
             or RoutingPolicy.from_dict(capture_status["core"]["config"]["policy"]).to_dict() != declared_policy):
         raise RuntimeError("qualified runtime or frozen policy changed before capture")
     ray.get(gateway.start_capture.remote(), timeout=300)
