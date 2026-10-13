@@ -13,6 +13,7 @@ instead of the structured stdout payload; only aggregates travel in the result.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import csv
 from collections import Counter
 import hashlib
@@ -21,15 +22,16 @@ import json
 import os
 import pathlib
 import statistics
+import threading
 import time
 import uuid
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import ray
 
 from .evidence import emit_event, emit_log
 from .manifest import load_manifest
-from .native_backend import BACKEND_REVISION, RUNTIME_REVISION
+from .native_backend import BACKEND_REVISION, RUNTIME_REVISION, effective_activation_dtype
 
 ARTIFACT_ROOT = pathlib.Path(os.environ.get("OMP_HETERO_ARTIFACTS", "/tmp/omp_hetero/artifacts"))
 
@@ -53,6 +55,8 @@ ARMS: Dict[str, Dict[str, Any]] = {
     "M0": {"layout": "M", "migration_enabled": False, "migration_mechanism": "recompute"},
     "MR": {"layout": "M", "migration_enabled": True, "migration_mechanism": "recompute"},
     "MK-H": {"layout": "M", "migration_enabled": True, "migration_mechanism": "kv_host"},
+    # Mb = M with its TP16 instance named large_b (staged S -> Mb -> H transitions).
+    "Mb0": {"layout": "Mb", "migration_enabled": False, "migration_mechanism": "recompute"},
 }
 
 # Admitted-population cap: the external feeder never has more than this many
@@ -63,52 +67,211 @@ WARMUP_MAX_TOKENS = 32
 INGRESS_URL = "http://omp-router.llm-d-optimized-baseline.svc.cluster.local"
 INGRESS_PROTOCOL = "envoy-ext-proc-v3"
 
+# llm-d EPP ingress (deploy/k8s/omp-epp-router.yaml): Envoy asks the forked EPP
+# for a destination and forwards the request itself, so the engine response is
+# the client response.  Envoy stamps the protocol and the upstream it used.
+EPP_INGRESS_URL = "http://omp-epp-router.llm-d-optimized-baseline.svc.cluster.local"
+EPP_ADMIN_URL = "http://omp-epp.llm-d-optimized-baseline.svc.cluster.local:9095"
+EPP_INGRESS_PROTOCOL = "llm-d-epp-ext-proc-v3"
+EPP_UPSTREAM_HEADER = "x-omp-upstream-host"
+EPP_TRACE_HEADER = "x-omp-route-trace"
+# Envoy stamps %COMMON_DURATION(DS_RX_BEG:US_TX_BEG:ms)%: EPP decision plus queue wait.
+EPP_QUEUE_HEADER = "x-omp-epp-queue-ms"
+# hetero-placement answers 429 with this refusal when no engine has room now.
+EPP_CAPACITY_REFUSAL = "no_destination_has_admissible_capacity"
+EPP_CONFIGS = ("plain", "reserve", "latebinding")
+EPP_POD_SELECTOR = "omp.llm-d.ai/component=epp"
+EPP_CONFIG_ANNOTATION = "omp.llm-d.ai/epp-config"
+EPP_CONFIG_SHA_ANNOTATION = "omp.llm-d.ai/epp-config-sha256"
+
+
+@dataclasses.dataclass(frozen=True)
+class EppIngress:
+    """Where to send and how to attribute requests routed by the llm-d EPP."""
+
+    url: str
+    model: str
+    endpoints: Dict[str, str]  # "ip:port" the EPP may pick -> logical instance id
+
+    def payload(self, request_id: str, prompt_token_ids: List[int], max_tokens: int) -> Dict[str, Any]:
+        # Standard OpenAI completion; the EPP counts prompt tokens from the int array.
+        return {"model": self.model, "prompt": list(prompt_token_ids), "max_tokens": int(max_tokens),
+                "ignore_eos": True, "stream": False, "request_id": request_id}
+
+
+def _extproc_record(item: Dict[str, Any], response: Any) -> Dict[str, Any]:
+    protocol = response.headers.get("x-omp-gateway-protocol")
+    if protocol != INGRESS_PROTOCOL:
+        raise ValueError(f"unqualified ingress protocol: {protocol!r}")
+    body = response.json()
+    if body["id"] != item["request_id"]:
+        raise ValueError("response request identity mismatch")
+    tokens = body["choices"][0]["token_ids"]
+    if body["usage"]["completion_tokens"] != len(tokens):
+        raise ValueError("response usage disagrees with delivered tokens")
+    return {
+        "request_id": body["id"],
+        "ingress_protocol": protocol,
+        "output_token_ids": tokens,
+        "useful_output_tokens": len(tokens),
+        "prompt_tokens": body["usage"]["prompt_tokens"],
+        "segments": [
+            dict(segment, instance_id=segment["instance"])
+            for segment in body["omp"]["segments"]
+        ],
+        "initial_instance": body["omp"]["initial_instance"],
+        "response": body,
+    }
+
+
+FAILURE_BODY_BYTES = 1024
+FAILURE_SIGNATURE_KEYS = ("http_status", "response_protocol", "response_headers", "response_body")
+
+
+def _failure_signature(response: Any) -> Dict[str, Any]:
+    """Which hop answered a failed request, kept with the client record.
+
+    The gateway marks every completion response it produces, errors included,
+    with the protocol header; an Envoy local reply (an ExtProc stream failure,
+    the unhandled-route 503) carries no marker and no gateway detail.
+    """
+    return {
+        "http_status": response.status_code,
+        "response_protocol": response.headers.get("x-omp-gateway-protocol"),
+        "response_headers": dict(response.headers),
+        "response_body": response.content[:FAILURE_BODY_BYTES].decode("utf-8", "replace"),
+    }
+
+
+def _epp_trace(response: Any) -> Dict[str, Any]:
+    raw = response.headers.get(EPP_TRACE_HEADER)
+    return json.loads(raw) if raw else {}
+
+
+def _epp_record(item: Dict[str, Any], response: Any, ingress: EppIngress) -> Dict[str, Any]:
+    """One engine response is one whole segment: the EPP never migrates or retries.
+
+    Timestamps stay on the clock that produced them: segment times are the
+    engine host's, client times this process's, and the EPP queue wait is
+    Envoy's own duration from downstream request start to upstream send.
+    """
+    protocol = response.headers.get("x-omp-gateway-protocol")
+    if protocol != EPP_INGRESS_PROTOCOL:
+        raise ValueError(f"unqualified ingress protocol: {protocol!r}")
+    body = response.json()
+    if body["id"] != item["request_id"]:
+        raise ValueError("response request identity mismatch")
+    choice = body["choices"][0]
+    tokens = choice["token_ids"]
+    if body["usage"]["completion_tokens"] != len(tokens):
+        raise ValueError("response usage disagrees with delivered tokens")
+    if body["usage"]["prompt_tokens"] != len(item["prompt"]):
+        raise ValueError("engine prompt length differs from the submitted token array")
+    served = body["omp"]["instance_id"]
+    upstream = response.headers.get(EPP_UPSTREAM_HEADER)
+    trace = _epp_trace(response)
+    if ingress.endpoints.get(upstream) != served or trace.get("selected") != served:
+        raise ValueError(f"EPP selected {trace.get('selected')!r} at {upstream!r} "
+                         f"but {served!r} served the request")
+    omp = body["omp"]
+    queue_ms = response.headers.get(EPP_QUEUE_HEADER)
+    if queue_ms is None or not queue_ms.isdigit():
+        raise ValueError(f"router did not report the EPP queue wait: {queue_ms!r}")
+    segment = {
+        "instance_id": served, "segment_instance": served, "generation": omp["generation"],
+        "output_tokens": len(tokens), "output_token_ids": tokens,
+        "finish_reason": choice["finish_reason"], "ttft_s": omp["ttft_s"],
+        "started_at_s": omp["started_at_s"], "finished_at_s": omp["finished_at_s"],
+    }
+    return {
+        "request_id": body["id"],
+        "ingress_protocol": protocol,
+        "output_token_ids": tokens,
+        "useful_output_tokens": len(tokens),
+        "prompt_tokens": body["usage"]["prompt_tokens"],
+        "segments": [segment],
+        "initial_instance": served,
+        "upstream_endpoint": upstream,
+        "route_trace": trace,
+        "epp_queue_s": int(queue_ms) / 1000.0,
+        "response": body,
+    }
+
+
+async def _post_epp(client: Any, content: bytes, stats: Dict[str, Any]) -> Any:
+    """Poll a capacity refusal exactly as GatewayCore's admission loop polls select_initial.
+
+    Without late binding the EPP answers "no engine has room" at once; the
+    Python gateway instead held the request (and its admitted-population slot)
+    and retried every admission_poll_s.  Any other refusal is final.  ``stats``
+    is updated in place, so retries survive a cancelled dispatch: every retry
+    resends the whole body through Envoy and the EPP.
+    """
+    from .gateway.core import GatewayConfig
+
+    config = GatewayConfig()
+    first = time.monotonic()
+    deadline = first + config.admission_timeout_s
+    while True:
+        sent = time.monotonic()
+        response = await client.post("/v1/completions", content=content,
+                                     headers={"content-type": "application/json"})
+        if (response.status_code != 429 or _epp_trace(response).get("refusal") != EPP_CAPACITY_REFUSAL
+                or time.monotonic() >= deadline):
+            stats["admission_poll_s"] = sent - first
+            return response
+        stats["capacity_retries"] += 1
+        stats["retry_request_bytes"] += len(content)
+        await asyncio.sleep(config.admission_poll_s)
+
 
 async def _dispatch_http(
-    requests: List[Dict[str, Any]], *, concurrency: int, timeout_s: float
+    requests: List[Dict[str, Any]], *, concurrency: int, timeout_s: float,
+    ingress: Optional[EppIngress] = None,
 ) -> List[Dict[str, Any]]:
-    """Collect real client responses through Envoy, with no automatic retries."""
+    """Collect real client responses through Envoy, with no automatic retries.
+
+    ``ingress=None`` is the Python ExtProc gateway; an :class:`EppIngress`
+    sends the same requests through the llm-d EPP-fronted Envoy instead, where
+    a capacity refusal is admission waiting (see :func:`_post_epp`), not a retry.
+    """
     import httpx
 
     semaphore = asyncio.Semaphore(concurrency)
     limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=concurrency)
     async with httpx.AsyncClient(
-        base_url=INGRESS_URL, limits=limits, timeout=timeout_s, trust_env=False
+        base_url=ingress.url if ingress else INGRESS_URL, limits=limits, timeout=timeout_s,
+        trust_env=False,
     ) as client:
+        stats = {item["request_id"]: {"capacity_retries": 0, "retry_request_bytes": 0}
+                 for item in requests} if ingress else {}
+
         async def dispatch(item: Dict[str, Any]) -> Dict[str, Any]:
             async with semaphore:
                 started = time.time()
+                response = None
                 try:
-                    response = await client.post("/v1/completions", json=item)
-                    response.raise_for_status()
-                    protocol = response.headers.get("x-omp-gateway-protocol")
-                    if protocol != INGRESS_PROTOCOL:
-                        raise ValueError(f"unqualified ingress protocol: {protocol!r}")
-                    body = response.json()
-                    if body["id"] != item["request_id"]:
-                        raise ValueError("response request identity mismatch")
-                    tokens = body["choices"][0]["token_ids"]
-                    if body["usage"]["completion_tokens"] != len(tokens):
-                        raise ValueError("response usage disagrees with delivered tokens")
-                    return {
-                        "request_id": body["id"],
-                        "ingress_protocol": protocol,
-                        "output_token_ids": tokens,
-                        "useful_output_tokens": len(tokens),
-                        "prompt_tokens": body["usage"]["prompt_tokens"],
-                        "segments": [
-                            dict(segment, instance_id=segment["instance"])
-                            for segment in body["omp"]["segments"]
-                        ],
-                        "initial_instance": body["omp"]["initial_instance"],
-                        "client_started_at_s": started,
-                        "client_finished_at_s": time.time(),
-                        "response": body,
-                    }
+                    if ingress is None:
+                        response = await client.post("/v1/completions", json=item)
+                        response.raise_for_status()
+                        record = _extproc_record(item, response)
+                    else:
+                        request_stats = stats[item["request_id"]]
+                        response = await _post_epp(
+                            client, json.dumps(item, separators=(",", ":")).encode(), request_stats)
+                        response.raise_for_status()
+                        record = _epp_record(item, response, ingress)
+                        # Sum of two durations, each measured on a single clock.
+                        record["admission_wait_s"] = request_stats["admission_poll_s"] + record["epp_queue_s"]
+                    record.update(client_started_at_s=started, client_finished_at_s=time.time())
+                    return record
                 except Exception as exc:
-                    return {"request_id": item["request_id"],
-                            "client_started_at_s": started, "client_finished_at_s": time.time(),
-                            "error": f"{type(exc).__name__}: {exc}"}
+                    failure = {"request_id": item["request_id"],
+                               "client_started_at_s": started, "client_finished_at_s": time.time(),
+                               "error": f"{type(exc).__name__}: {exc}"}
+                    if response is not None:
+                        failure.update(_failure_signature(response))
+                    return failure
 
         tasks = [asyncio.create_task(dispatch(item)) for item in requests]
         _, pending = await asyncio.wait(tasks, timeout=timeout_s)
@@ -116,11 +279,78 @@ async def _dispatch_http(
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
         return [
-            {"request_id": item["request_id"], "client_finished_at_s": time.time(),
-             "error": "whole-batch deadline exceeded before final client delivery"}
-            if task in pending else task.result()
+            {**({"request_id": item["request_id"], "client_finished_at_s": time.time(),
+                 "error": "whole-batch deadline exceeded before final client delivery"}
+                if task in pending else task.result()),
+             **stats.get(item["request_id"], {})}
             for item, task in zip(requests, tasks)
         ]
+
+
+def _epp_arm_config(name: str) -> Dict[str, Any]:
+    """The committed EPP config file and proof that the running EPP pods load it."""
+    if name not in EPP_CONFIGS:
+        raise ValueError(f"unknown EPP config {name!r}; known: {list(EPP_CONFIGS)}")
+    root = pathlib.Path(__file__).resolve().parents[1]
+    relative = f"deploy/epp/{name}.yaml"
+    digest = hashlib.sha256((root / relative).read_bytes()).hexdigest()
+    from .gateway.discovery import InClusterKube
+
+    pods = InClusterKube().list_pods(EPP_POD_SELECTOR)
+    ready = [pod for pod in pods if not pod["metadata"].get("deletionTimestamp") and any(
+        c.get("type") == "Ready" and c.get("status") == "True"
+        for c in (pod.get("status", {}) or {}).get("conditions", []) or [])]
+    loaded = sorted({(pod["metadata"].get("annotations", {}).get(EPP_CONFIG_ANNOTATION),
+                      pod["metadata"].get("annotations", {}).get(EPP_CONFIG_SHA_ANNOTATION))
+                     for pod in pods}, key=str)
+    if not ready or len(ready) != len(pods) or loaded != [(name, digest)]:
+        raise RuntimeError(f"running EPP pods do not all serve {relative} ({digest[:12]}): {loaded}")
+    return {"name": name, "path": relative, "file_sha256": digest,
+            "epp_pods": sorted(pod["metadata"]["name"] for pod in pods)}
+
+
+def _epp_placement_state(admin_url: str) -> Dict[str, Any]:
+    import httpx
+
+    response = httpx.get(f"{admin_url}/hetero/state", timeout=10.0, trust_env=False)
+    response.raise_for_status()
+    return response.json()
+
+
+def _placement_idle(state: Dict[str, Any]) -> bool:
+    """No reservation, pending lease or projected block/request on any endpoint."""
+    return (state["reservations"] == 0 and state["leases"] == 0
+            and all(row["blocks"] == 0 and row["requests"] == 0 for row in state["projection"].values()))
+
+
+def _epp_placement_reset(admin_url: str, *, timeout_s: float = 30.0,
+                         poll_s: float = 0.5) -> Dict[str, Any]:
+    """Zero hetero-placement's fresh-traffic quota counters and KV projection.
+
+    The Python gateway starts every run from a new CentralScheduler and empty
+    projection; the long-lived EPP must be reset to match.  409 means a
+    reservation is still live; unconfirmed leases lapse within the plugin's
+    bindLeaseSeconds, so wait instead of forcing.  The late-binding queue is
+    not touched (the caller resets only after the fabric drained).
+    """
+    import httpx
+
+    deadline = time.monotonic() + timeout_s
+    attempts = 0
+    with httpx.Client(base_url=admin_url, timeout=10.0, trust_env=False) as client:
+        while True:
+            attempts += 1
+            response = client.post("/hetero/reset")
+            if response.status_code == 200:
+                break
+            if response.status_code != 409 or time.monotonic() >= deadline:
+                raise RuntimeError(f"EPP placement reset refused: {response.status_code} {response.text[:300]}")
+            time.sleep(poll_s)
+        after = client.get("/hetero/state").json()
+    if after["fresh_dispatched"] or after["fresh_to_large"] or not _placement_idle(after):
+        raise RuntimeError(f"EPP placement state not empty after reset: {after}")
+    return {"reset": True, "attempts": attempts, "before": response.json()["before"], "after": after}
+
 
 def _instance_roles(layout_id: str, instances: Iterable[str]) -> Dict[str, List[str]]:
     names = sorted(instances)
@@ -318,9 +548,10 @@ def _loaded_runtime(status: Dict[str, Any], qualified: Dict[str, Any]) -> Dict[s
             precision = worker.get("precision", {})
             devices = worker.get("devices", {})
             rank = host_ips.index(worker["node_ip"])
+            activation_dtype = effective_activation_dtype(settings["activation_dtype"], parameter_dtype)
             wanted_precision = {**revisions, "verified_before_cache_allocation": True,
                                 "model_dtype": parameter_dtype,
-                                "activation_dtype": settings["activation_dtype"],
+                                "activation_dtype": activation_dtype,
                                 "configured_cache_dtype": settings["kv_cache_dtype"],
                                 "runner_cache_dtype": settings["kv_cache_dtype"],
                                 "matmul_precision": settings["matmul_precision"]}
@@ -335,7 +566,7 @@ def _loaded_runtime(status: Dict[str, Any], qualified: Dict[str, Any]) -> Dict[s
                     or any(precision.get(k) != value for k, value in wanted_precision.items())):
                 raise RuntimeError(f"worker loaded backend/precision differs from qualification: {name}")
             for key, dtype in (("parameter_dtypes", parameter_dtype),
-                               ("decoder_norm_dtypes", settings["activation_dtype"]),
+                               ("decoder_norm_dtypes", activation_dtype),
                                ("attention_cache_dtypes", settings["kv_cache_dtype"])):
                 counts = precision.get(key, {})
                 if set(counts) != {dtype} or not isinstance(counts[dtype], int) or counts[dtype] <= 0:
@@ -362,17 +593,34 @@ def run_arm(
     policy_overrides: Optional[Dict[str, Any]] = None,
     protocol_path: Optional[str] = None,
     pilot_policy: Optional[Dict[str, Any]] = None,
+    epp_config: Optional[str] = None,
+    during_run: Optional[Callable[[threading.Event], Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Timed arm. pilot_policy selects an UNFROZEN pilot: no cohort binding, an
     explicit policy amendment over BASE_POLICY, and output never eligible as
-    cohort or headline evidence."""
+    cohort or headline evidence.
+
+    epp_config names a committed deploy/epp arm config and sends the workload
+    through the llm-d EPP-fronted Envoy instead of the Python ExtProc gateway.
+    The EPP then owns routing; the gateway actor only supplies the engine
+    bindings, idle barriers and iteration capture, with migration disabled.
+    EPP runs are always unfrozen pilots and take no Python policy amendment."""
     from .gateway.lifecycle import find_gateway
 
     pilot = pilot_policy is not None
+    if epp_config is not None and (not pilot or pilot_policy):
+        raise ValueError("EPP ingress runs are unfrozen pilots whose routing is the EPP config; "
+                         "pass an empty --policy amendment")
+    if during_run is not None and (not pilot or epp_config is not None):
+        raise ValueError("during_run is only legal for an unfrozen, non-EPP pilot")
     if pilot:
-        unknown = set(pilot_policy) - set(BASE_POLICY)
+        from .gateway.policy import RoutingPolicy
+
+        amendable = {f.name for f in dataclasses.fields(RoutingPolicy)} - {
+            "small_instances", "large_instances", "migration_enabled", "migration_mechanism"}
+        unknown = set(pilot_policy) - amendable
         if unknown:
-            raise ValueError(f"pilot policy may only amend BASE_POLICY fields: {sorted(unknown)}")
+            raise ValueError(f"pilot policy may only amend routing policy fields: {sorted(unknown)}")
         cohort = {"unfrozen_pilot": True, "pilot_policy": dict(pilot_policy),
                   "evidence_scope": "UNFROZEN pilot; never cohort or headline evidence"}
     else:
@@ -384,6 +632,9 @@ def run_arm(
     if arm not in ARMS:
         raise KeyError(f"unknown arm {arm}; known: {sorted(ARMS)}")
     spec = ARMS[arm]
+    if epp_config is not None and spec["migration_enabled"]:
+        raise ValueError(f"arm {arm} migrates; the EPP cannot retarget a routed request")
+    epp = _epp_arm_config(epp_config) if epp_config is not None else None
     gateway = find_gateway()
     if gateway is None:
         raise RuntimeError("gateway actor is not running; start it with `gateway-up`")
@@ -428,6 +679,15 @@ def run_arm(
         raise RuntimeError("gateway applied policy differs from the frozen arm")
     requests = manifest["requests"]
     request_namespace = uuid.uuid4().hex
+    ingress = None if epp is None else EppIngress(
+        url=EPP_INGRESS_URL, model=manifest["model"],
+        endpoints={status["bindings"][name]["endpoint"]: name for name in instances})
+
+    def request_body(request_id: str, prompt_token_ids: List[int], max_tokens: int) -> Dict[str, Any]:
+        if ingress is not None:
+            return ingress.payload(request_id, prompt_token_ids, max_tokens)
+        return {"request_id": request_id, "prompt_token_ids": prompt_token_ids,
+                "max_tokens": max_tokens, "ignore_eos": True}
 
     # Warmup conversations are disjoint from every frozen timed workload.
     from transformers import AutoTokenizer
@@ -449,17 +709,18 @@ def run_arm(
         raise ValueError("insufficient disjoint real warmup conversations")
     tokenizer = AutoTokenizer.from_pretrained(manifest["model"])
     warmup_ids = tokenizer([row["prompt"] for row in warmup_prompts], add_special_tokens=True)["input_ids"]
+    warmup_prompt_ids = [token_ids[:256] for token_ids in warmup_ids]
     warmup_payload = [
-        {"request_id": f"warm-{request_namespace}-{index:03d}",
-         "prompt_token_ids": token_ids[:256],
-         "max_tokens": WARMUP_MAX_TOKENS, "ignore_eos": True}
-        for index, token_ids in enumerate(warmup_ids)
+        request_body(f"warm-{request_namespace}-{index:03d}", token_ids, WARMUP_MAX_TOKENS)
+        for index, token_ids in enumerate(warmup_prompt_ids)
     ]
 
     emit_event("ARM_RESET", arm=arm, workload=workload, repetition=repetition)
     ray.get(gateway.reset_records.remote(), timeout=120)
     ray.get(gateway.resume_admission.remote(), timeout=120)
     idle_before = ray.get(gateway.await_idle_instances.remote(300.0), timeout=360)
+    # Between repetitions: the previous run's quota counters must not steer this warmup.
+    epp_resets = {} if ingress is None else {"before_warmup": _epp_placement_reset(EPP_ADMIN_URL)}
 
     warmup_status = ray.get(gateway.status.remote(), timeout=120)
     if (runtime(warmup_status) != loaded_runtime
@@ -467,7 +728,7 @@ def run_arm(
         raise RuntimeError("qualified runtime or frozen policy changed before warmup")
     emit_event("ARM_WARMUP", arm=arm, requests=len(warmup_payload))
     warmup = asyncio.run(_dispatch_http(
-        warmup_payload, concurrency=len(warmup_payload), timeout_s=1800.0
+        warmup_payload, concurrency=len(warmup_payload), timeout_s=1800.0, ingress=ingress
     ))
     warmup_errors = [w for w in warmup if w.get("error")]
     if warmup_errors:
@@ -487,6 +748,9 @@ def run_arm(
         raise FileExistsError(f"refusing to overwrite retained evidence for {label}: {summary_path}")
 
     ray.get(gateway.await_idle_instances.remote(300.0), timeout=360)
+    if ingress is not None:
+        # Warmup traffic must not count toward the timed run's large-fresh-traffic quota.
+        epp_resets["before_timed_run"] = _epp_placement_reset(EPP_ADMIN_URL)
     ray.get(gateway.reset_records.remote(), timeout=120)
     capture_status = ray.get(gateway.status.remote(), timeout=120)
     if (runtime(capture_status) != loaded_runtime
@@ -495,12 +759,7 @@ def run_arm(
     ray.get(gateway.start_capture.remote(), timeout=300)
 
     payload = [
-        {
-            "request_id": f"{request_namespace}:{row['request_id']}",
-            "prompt_token_ids": row["prompt_token_ids"],
-            "max_tokens": row["max_tokens"],
-            "ignore_eos": True,
-        }
+        request_body(f"{request_namespace}:{row['request_id']}", row["prompt_token_ids"], row["max_tokens"])
         for row in requests
     ]
 
@@ -513,13 +772,31 @@ def run_arm(
         useful_output_tokens=manifest["useful_output_tokens"],
         admitted_cap=ADMITTED_CAP,
     )
+    during_box: Dict[str, Any] = {}
+    during_thread = None
+    during_cancel = threading.Event()
+    if during_run is not None:
+        def _during() -> None:
+            try:
+                during_box["result"] = during_run(during_cancel)
+            except BaseException as exc:  # noqa: BLE001 - reported in the summary, never lost
+                # Remote (Ray) errors put the traceback first and the cause last: keep the tail.
+                during_box["error"] = f"{type(exc).__name__}: {str(exc)[-2000:]}"
+                during_box["failed_at"] = time.time()
+
+        during_thread = threading.Thread(target=_during, name="omp-arm-during-run", daemon=True)
+        during_thread.start()
     started_wall = time.time()
     started_mono = time.perf_counter()
     try:
         records = asyncio.run(_dispatch_http(
-            payload, concurrency=ADMITTED_CAP, timeout_s=timeout_s
+            payload, concurrency=ADMITTED_CAP, timeout_s=timeout_s, ingress=ingress
         ))
     except BaseException:
+        # A failed workload must not keep deploying/joining: cancel the hook and wait for it.
+        if during_thread is not None:
+            during_cancel.set()
+            during_thread.join()
         # Never leave the fabric armed for a workload that will not be recorded.
         ray.get(gateway.stop_capture.remote(), timeout=600)
         raise
@@ -528,14 +805,25 @@ def run_arm(
     for row in records:
         row["canonical_request_id"] = row["request_id"].removeprefix(f"{request_namespace}:")
     emit_event("ARM_END", arm=arm, makespan_s=round(makespan_s, 3))
+    if during_thread is not None:
+        # Join after the clock stopped: the hook may outlive the workload (late join).
+        during_thread.join()
 
     _write_gz(artifact_dir / f"{label}_records.json.gz", records)
     iterations = ray.get(gateway.stop_capture.remote(), timeout=600)
     final_status = ray.get(gateway.status.remote(), timeout=120)
-    traces = ray.get(gateway.traces.remote(200000), timeout=300)
-
-    authoritative = ray.get(gateway.records.remote(), timeout=300)
-    _write_gz(artifact_dir / f"{label}_gateway_records.json.gz", authoritative)
+    if ingress is not None:
+        # Engines are idle: any reservation still held here leaked from the run.
+        epp_resets["state_after_run"] = _epp_placement_state(EPP_ADMIN_URL)
+    if ingress is None:
+        _write_gz(artifact_dir / f"{label}_traces.json.gz",
+                  ray.get(gateway.traces.remote(200000), timeout=300))
+        authoritative = ray.get(gateway.records.remote(), timeout=300)
+        _write_gz(artifact_dir / f"{label}_gateway_records.json.gz", authoritative)
+    else:
+        # The engine response is the client response: nothing sits between them to
+        # disagree with, so exact accounting runs on the delivered records.
+        authoritative = records
     from .qualify_migration import _check_accounting
     accounting = _check_accounting(
         authoritative, {f"{request_namespace}:{r['request_id']}": r["max_tokens"] for r in requests}
@@ -550,12 +838,13 @@ def run_arm(
     progress = _progress_summary(records, iterations, started_wall, finished_wall)
     _write_gz(artifact_dir / f"{label}_progress.json.gz", progress)
     iteration_stats = _write_iterations(artifact_dir, f"{workload}_{arm}", repetition, iterations)
-    _write_gz(artifact_dir / f"{label}_traces.json.gz", traces)
     _write_gz(
         artifact_dir / f"{label}_transactions.json.gz",
         final_status["core"]["state"]["transactions"],
     )
 
+    if during_run is not None:
+        instances = sorted(final_status["instances"])  # joiners served too
     summary = _summarise(
         arm=arm,
         workload=workload,
@@ -576,27 +865,43 @@ def run_arm(
         summary["all_requests_complete"] and delivery_matches
         and accounting["no_duplicate_delivery"] and accounting["all_budgets_exact"]
     )
+    protocol = EPP_INGRESS_PROTOCOL if ingress else INGRESS_PROTOCOL
     summary.update(
         {
             **cohort,
             "request_id_namespace": request_namespace,
             "run_id": run_id,
-            "ingress_url": INGRESS_URL,
-            "request_path": "Envoy HTTP /v1/completions -> ExtProc gateway authority -> engine",
-            "ingress_protocol": INGRESS_PROTOCOL if all(
-                r.get("ingress_protocol") == INGRESS_PROTOCOL for r in records
-            ) else None,
+            "ingress_url": ingress.url if ingress else INGRESS_URL,
+            "request_path": ("Envoy HTTP /v1/completions -> llm-d EPP ext-proc destination -> engine"
+                             if ingress else
+                             "Envoy HTTP /v1/completions -> ExtProc gateway authority -> engine"),
+            "ingress_protocol": protocol if all(
+                r.get("ingress_protocol") == protocol for r in records) else None,
             "warmup": {"source_ids": [row["id"] for row in warmup_prompts],
-                       "prompt_token_ids": [row["prompt_token_ids"] for row in warmup_payload],
+                       "prompt_token_ids": warmup_prompt_ids,
                        "max_tokens": WARMUP_MAX_TOKENS,
                        "catalogue_sha256": catalogue["sha256"]},
+            # Under the EPP the Python policy only fences migration off; routing is epp_config.
             "policy": applied,
+            "epp_config": epp,
+            "epp_capacity_retries": None if ingress is None else {
+                "total": sum(r["capacity_retries"] for r in records),
+                "max_per_request": max((r["capacity_retries"] for r in records), default=0),
+                "requests_retried": sum(1 for r in records if r["capacity_retries"]),
+                "retry_request_bytes": sum(r["retry_request_bytes"] for r in records),
+            },
+            # hetero-placement quota counters and projection reset before warmup and
+            # before the timed run; state_after_run must hold no reservations.
+            "epp_placement_reset": epp_resets or None,
+            "epp_reservations_released": None if ingress is None else _placement_idle(
+                epp_resets["state_after_run"]),
             "layout_id": deployed_layout,
             "artifact_dir": str(artifact_dir),
             "started_wall": started_wall,
             "finished_wall": finished_wall,
             "idle_before": idle_before,
             "loaded_runtime": loaded_runtime,
+            "during_run": during_box if during_run is not None else None,
         }
     )
     emit_event(
@@ -854,8 +1159,12 @@ def _summarise(
         "unexpected_requests": unexpected,
         "duplicate_requests": duplicates,
         "failed_requests": [
-            {"request_id": r.get("request_id"), "error": r["error"]} for r in failed
+            {"request_id": r.get("request_id"), "error": r["error"],
+             **{key: r[key] for key in FAILURE_SIGNATURE_KEYS if key in r}}
+            for r in failed
         ],
+        # Streams the gateway's ExtProc aborted (Envoy: bodiless 500, upstream "-").
+        "gateway_extproc_aborts": status.get("extproc_aborts"),
         "short_requests": short,
         "replayed_tokens": replayed,
         "transferred_bytes": sum(int(t.get("transferred_bytes", 0)) for t in committed),

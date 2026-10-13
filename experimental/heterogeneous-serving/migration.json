@@ -561,13 +561,13 @@
     },
     {
       "path": "hetero/experiment.py",
-      "sha256": "a619d6e08744d6bf7562e26620fbe0f006a08fd9d08df5122e781bf231552cac",
-      "bytes": 45175
+      "sha256": "167b01ef4a93a42b5d013a1b7f2af9e588314579a7dcb4e07fbc5df5232b34d5",
+      "bytes": 61330
     },
     {
       "path": "hetero/manifest.py",
-      "sha256": "74ef34f76274d5c052c119e4e785d73bd8a64009ee794a11167f7c78b65e8f49",
-      "bytes": 12950
+      "sha256": "d479c285b44ee84b2463b399514f48ef27e2e02d4fefa9b8b4edf0dd0c6b886e",
+      "bytes": 26624
     },
     {
       "path": "hetero/mechanism_cost.py",
@@ -581,8 +581,8 @@
     },
     {
       "path": "hetero/workload.py",
-      "sha256": "90d6a0cc35ae9c15c6fbc94fa7e7ec4cff8203f760c1a9b6cce703dba9017756",
-      "bytes": 2755
+      "sha256": "b5da3eb93c67d63256b94b203c15ba0b75e9bd13d5edc7e9c2a12503ecc4a28e",
+      "bytes": 3806
     },
     {
       "path": "local/design_batch_profile.md",
@@ -610,6 +610,31 @@
       "bytes": 10900
     },
     {
+      "path": "scripts/build_longctx_catalogue.py",
+      "sha256": "2122ad59755d1f6549b257a7ef7a26f9d4c68bbded1102a331f9736b8370075d",
+      "bytes": 3102
+    },
+    {
+      "path": "scripts/build_longdoc_catalogue.py",
+      "sha256": "8862a0518c5672f4f48944a8d12390d165c397eb74372dec1dd47ce4f02da772",
+      "bytes": 2421
+    },
+    {
+      "path": "scripts/build_midctx_catalogue.py",
+      "sha256": "68c8c93e717ce0230402996e41fe0b2501edda7ec4bc2e9b1511c0318a89fd88",
+      "bytes": 3504
+    },
+    {
+      "path": "scripts/build_reasoning_catalogue.py",
+      "sha256": "3e96f229e16e6cf2ce0ecf940ed10790368f2385c8162a72c8b8fe382fbae588",
+      "bytes": 2604
+    },
+    {
+      "path": "scripts/build_translation_catalogue.py",
+      "sha256": "e14c7fff41397da96a3b8d480a008e7cc47cecceba038d7c8a089f393aea1b14",
+      "bytes": 2759
+    },
+    {
       "path": "scripts/optimize_batch_size_policy.py",
       "sha256": "5e25874563bbbea35615672bf0582d909f30311bdfe40979b2707533100acdc4",
       "bytes": 8228
@@ -620,9 +645,24 @@
       "bytes": 8204
     },
     {
+      "path": "scripts/production_c_recut.py",
+      "sha256": "8fe700366859fc8cbae33465b3e31dce45c1ca00a368fb5f7f16b86ac12ec1aa",
+      "bytes": 12329
+    },
+    {
+      "path": "scripts/reconfig_breakeven.py",
+      "sha256": "6b46bf3709051b8bcd127ecd9cbe6e6b73ae6b80b74d3841b922a47991bee5b1",
+      "bytes": 2659
+    },
+    {
       "path": "scripts/run_experiment.py",
       "sha256": "327a496b4d37421867e90c1e189d999f067cce9d49f81be46b64a25ce40c8ad9",
       "bytes": 878
+    },
+    {
+      "path": "scripts/simulate_length_aware.py",
+      "sha256": "041dcae7c3e2a0912243899bf93111c8d962d0d1e739a7379cf272443451fc38",
+      "bytes": 15310
     },
     {
       "path": "scripts/submit_measurement_audit.py",
@@ -650,6 +690,16 @@
       "bytes": 10655
     },
     {
+      "path": "tests/test_composite_manifest.py",
+      "sha256": "4df10f20bc1d70cc17d5b05f6ff4cace89033a266a2cb9ac64fd022d068537e4",
+      "bytes": 2028
+    },
+    {
+      "path": "tests/test_epp_ingress.py",
+      "sha256": "133468f42d5ff965253f264658c29a47014e3131425fa2b4f04028681c140d37",
+      "bytes": 9314
+    },
+    {
       "path": "tests/test_mechanism_cost.py",
       "sha256": "29effe9617456966e49556650cc99c9196ac27d6d1a02c7ad7ed06743d1024fd",
       "bytes": 14116
@@ -658,6 +708,16 @@
       "path": "tests/test_preemption_reprefill_vs_suspension.py",
       "sha256": "717f541407d41d8ed77a520e827956089aad23578037d7cc1c953c17713fec19",
       "bytes": 3823
+    },
+    {
+      "path": "tests/test_w6_manifest.py",
+      "sha256": "491f5e8737e143b607dc770622f3df88c6f34cb1dc66da3ed487495fe4bbaa69",
+      "bytes": 4672
+    },
+    {
+      "path": "tests/test_w7_manifest.py",
+      "sha256": "a8bc48f9eb815ff668d33517517136a2f96737c00298cdcf11988cde553799b5",
+      "bytes": 5972
     }
   ]
 }

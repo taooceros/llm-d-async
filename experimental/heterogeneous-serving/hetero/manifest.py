@@ -40,7 +40,48 @@ CATALOGUE_WINDOWS = {
     "W2": (20000, 27000),
     "E_SHORT": (0, 27000),
     "E_LONG": (0, 27000),
+    "W3": (0, 4000),
+    "W4": (0, 12000),
+    "W5": (0, 1460),
+    "W6": (0, 63),
+    "W7": (0, 240),  # all 240 midctx catalogue records
 }
+
+# Long-decode offline reasoning backlog: every request decodes for the length
+# of a real R1 trace for its problem (median ~5.1k, p90 ~12k tokens), so a TP8
+# instance (~26k KV tokens) cannot hold many to completion. Intended for
+# length-blind scheduling: the gateway must not read max_tokens, so growth is
+# discovered at run time and pressure forces preemption or migration.
+W3_SPEC = {"requests": 160, "catalogue": "reasoning", "seed": 20260929,
+           "max_context_tokens": 16384}
+
+# Mixed long-document + chat bulk backlog.  Short requests reuse a seeded
+# sample of the historical W0 (prompt, decode) demands bound to real ShareGPT
+# conversations; long requests are real GovReport reports whose full context
+# exceeds a TP8 engine's entire KV pool (26368 tokens), so only TP16 engines
+# can serve them.  Long requests are spread uniformly through arrival order.
+W4_SPEC = {"short_requests": 880, "long_requests": 24, "long_catalogue": "longdoc",
+           "seed": 20260930, "min_long_context_tokens": 27000,
+           "max_context_tokens": 36864}
+
+# Long-prompt + long-output bulk backlog: translate a whole English TED talk
+# transcript into French or German; decode length is the real published
+# translation's length (median prompt ~3.5k, decode ~4k tokens).
+W5_SPEC = {"requests": 250, "catalogue": "translation", "seed": 20260930,
+           "max_context_tokens": 16384}
+
+# Long-context bulk backlog: real GovReport reports whose prompt exceeds a bf16
+# TP8 KV pool (52,864 tokens); only a TP16 engine with max_model_len 131072 can
+# serve them.  Decode length is the real summary's length; run with ignore_eos.
+W6_SPEC = {"requests": 40, "catalogue": "longctx", "seed": 20261006,
+           "min_prompt_tokens": 52865, "max_context_tokens": 131072}
+
+# Mid-length band: real GovReport reports with 16,384-49,152-token prompts;
+# fits both a bf16 TP8 pool (52.9k; S deployed at max_model_len 51,200) and a
+# TP16.  Decode length is the real summary's length; run with ignore_eos.
+W7_SPEC = {"requests": 120, "catalogue": "midctx", "seed": 20261007,
+           "min_prompt_tokens": 16384, "max_prompt_tokens": 49152,
+           "max_context_tokens": 51200}
 
 W1_SPEC = {
     "requests": 320,
@@ -281,6 +322,164 @@ def _build_efficiency(name: str, model: str) -> Dict[str, Any]:
     })
 
 
+def _build_reasoning(model: str, name: str = "W3") -> Dict[str, Any]:
+    spec = {"W3": W3_SPEC, "W5": W5_SPEC}[name]
+    tokenised = _tokenise_catalogue(model, spec["catalogue"])
+    records = load_catalogue(spec["catalogue"])["records"]
+    rows = _window(tokenised, name)
+    rng = random.Random(spec["seed"])
+    order = list(range(len(rows)))
+    rng.shuffle(order)
+    requests = []
+    for index in order:
+        row, record = rows[index], records[rows[index]["index"]]
+        decode = int(record["reference_decode_tokens"])
+        if row["num_tokens"] + decode > spec["max_context_tokens"]:
+            continue  # model tokenizer disagrees with the catalogue; never truncate
+        requests.append({
+            "request_id": f"{name}-{len(requests):05d}", "arrival_index": len(requests),
+            "prompt_token_ids": row["token_ids"], "prompt_tokens": row["num_tokens"],
+            "demanded_prompt_tokens": row["num_tokens"], "max_tokens": decode,
+            "source_id": row["id"],
+        })
+        if len(requests) == spec["requests"]:
+            break
+    if len(requests) != spec["requests"]:
+        raise ValueError(f"{spec['catalogue']} catalogue cannot satisfy {name}")
+    sources = {
+        "W3": ("seeded shuffle of the reasoning catalogue; decode length is the real R1 trace length for the same problem; run with ignore_eos",
+               "open-r1/OpenR1-Math-220k default shard 0, open-thoughts/OpenThoughts-114k shard 0 (Apache-2.0)"),
+        "W5": ("seeded shuffle of the translation catalogue; decode length is the real published fr/de translation length of the same talk; run with ignore_eos",
+               "IWSLT/ted_talks_iwslt XML_releases/xml-20150616 ted_{en,fr,de}-20150530 (CC BY-NC-ND 4.0)"),
+    }[name]
+    return _finalise(name, requests, tokenised, provenance={
+        "spec": spec, "selection": sources[0], "sources": sources[1],
+        "intended_policy": "decode_length_blind",
+    })
+
+
+def _build_longdoc_mix(model: str) -> Dict[str, Any]:
+    spec = W4_SPEC
+    rng = random.Random(spec["seed"])
+    raw = _historical_manifest_path().read_bytes()
+    if hashlib.sha256(raw).hexdigest() != HISTORICAL_MANIFEST_SHA256:
+        raise ValueError("historical manifest hash changed")
+    triples = json.loads(raw)
+    short_triples = sorted(rng.sample(range(len(triples)), spec["short_requests"]))
+    tokenised = _tokenise_catalogue(model, "large")
+    assignments, stats = _assign_unique(
+        _window(tokenised, "W4"), [int(triples[i][0]) for i in short_triples])
+    short = [
+        {"prompt_token_ids": bound["token_ids"], "prompt_tokens": len(bound["token_ids"]),
+         "demanded_prompt_tokens": int(triples[i][0]), "max_tokens": int(triples[i][1]),
+         "source_id": bound["source_id"], "request_class": "short"}
+        for i, bound in zip(short_triples, assignments)
+    ]
+
+    long_tokenised = _tokenise_catalogue(model, spec["long_catalogue"])
+    long_catalogue = load_catalogue(spec["long_catalogue"])
+    long = []
+    for row in long_tokenised["rows"]:
+        decode = int(long_catalogue["records"][row["index"]]["reference_decode_tokens"])
+        context = row["num_tokens"] + decode
+        if not spec["min_long_context_tokens"] <= context <= spec["max_context_tokens"]:
+            continue  # model tokenizer disagrees with the catalogue; never truncate
+        long.append({"prompt_token_ids": row["token_ids"], "prompt_tokens": row["num_tokens"],
+                     "demanded_prompt_tokens": row["num_tokens"], "max_tokens": decode,
+                     "source_id": row["id"], "request_class": "long"})
+        if len(long) == spec["long_requests"]:
+            break
+    if len(long) != spec["long_requests"]:
+        raise ValueError("long-document catalogue cannot satisfy W4")
+
+    # Long request k sits at a seeded position inside the k-th equal slice of
+    # the arrival order, so long work arrives throughout the backlog.
+    total = len(short) + len(long)
+    slots = {int((k + rng.random()) * total / len(long)): row for k, row in enumerate(long)}
+    shorts = iter(short)
+    requests = []
+    for index in range(total):
+        row = slots.get(index) or next(shorts)
+        requests.append({"request_id": f"W4-{index:05d}", "arrival_index": index, **row})
+    return _finalise("W4", requests, tokenised, provenance={
+        "spec": spec,
+        "short": {"historical_manifest": HISTORICAL_MANIFEST,
+                  "historical_manifest_sha256": HISTORICAL_MANIFEST_SHA256,
+                  "triple_indices_sha256": hashlib.sha256(
+                      json.dumps(short_triples).encode()).hexdigest(),
+                  "assignment": stats},
+        "long": {"catalogue": long_catalogue["path"], "catalogue_sha256": long_catalogue["sha256"],
+                 "source": "ccdv/govreport-summarization train shard 0; decode length is the real summary length; run with ignore_eos"},
+        "intended_policy": "decode_length_blind",
+    })
+
+
+def _build_longctx(model: str) -> Dict[str, Any]:
+    spec = W6_SPEC
+    tokenised = _tokenise_catalogue(model, spec["catalogue"])
+    catalogue = load_catalogue(spec["catalogue"])
+    eligible = []
+    for row in tokenised["rows"]:
+        decode = int(catalogue["records"][row["index"]]["reference_decode_tokens"])
+        if row["num_tokens"] < spec["min_prompt_tokens"] or \
+                row["num_tokens"] + decode > spec["max_context_tokens"]:
+            continue  # model tokenizer disagrees with the catalogue; never truncate
+        eligible.append((row, decode))
+    if len(eligible) < spec["requests"]:
+        raise ValueError("long-context catalogue cannot satisfy W6")
+    rng = random.Random(spec["seed"])
+    chosen = rng.sample(eligible, spec["requests"])
+    rng.shuffle(chosen)  # arrival order
+    requests = [
+        {"request_id": f"W6-{index:05d}", "arrival_index": index,
+         "prompt_token_ids": row["token_ids"], "prompt_tokens": row["num_tokens"],
+         "demanded_prompt_tokens": row["num_tokens"], "max_tokens": decode,
+         "source_id": row["id"], "request_class": "long"}
+        for index, (row, decode) in enumerate(chosen)
+    ]
+    shards = sorted({r["split"] for r in catalogue["records"]})
+    return _finalise("W6", requests, tokenised, provenance={
+        "spec": spec, "catalogue": catalogue["path"], "catalogue_sha256": catalogue["sha256"],
+        "source": "ccdv/govreport-summarization shards " + ", ".join(shards)
+                  + "; decode length is the real summary length; run with ignore_eos",
+        "eligible_after_model_tokenizer": len(eligible),
+        "intended_policy": "decode_length_blind",
+    })
+
+
+def _build_midctx(model: str) -> Dict[str, Any]:
+    spec = W7_SPEC
+    tokenised = _tokenise_catalogue(model, spec["catalogue"])
+    catalogue = load_catalogue(spec["catalogue"])
+    eligible = []
+    for row in tokenised["rows"]:
+        decode = int(catalogue["records"][row["index"]]["reference_decode_tokens"])
+        if not spec["min_prompt_tokens"] <= row["num_tokens"] <= spec["max_prompt_tokens"] or \
+                row["num_tokens"] + decode > spec["max_context_tokens"]:
+            continue  # model tokenizer disagrees with the catalogue; never truncate
+        eligible.append((row, decode))
+    if len(eligible) < spec["requests"]:
+        raise ValueError("mid-context catalogue cannot satisfy W7")
+    rng = random.Random(spec["seed"])
+    chosen = rng.sample(eligible, spec["requests"])
+    rng.shuffle(chosen)  # arrival order
+    requests = [
+        {"request_id": f"W7-{index:05d}", "arrival_index": index,
+         "prompt_token_ids": row["token_ids"], "prompt_tokens": row["num_tokens"],
+         "demanded_prompt_tokens": row["num_tokens"], "max_tokens": decode,
+         "source_id": row["id"], "request_class": "mid"}
+        for index, (row, decode) in enumerate(chosen)
+    ]
+    shards = sorted({r["split"] for r in catalogue["records"]})
+    return _finalise("W7", requests, tokenised, provenance={
+        "spec": spec, "catalogue": catalogue["path"], "catalogue_sha256": catalogue["sha256"],
+        "source": "ccdv/govreport-summarization shards " + ", ".join(shards)
+                  + "; decode length is the real summary length; run with ignore_eos",
+        "eligible_after_model_tokenizer": len(eligible),
+        "intended_policy": "decode_length_blind",
+    })
+
+
 def _finalise(
     name: str,
     requests: List[Dict[str, Any]],
@@ -320,12 +519,73 @@ def build_manifest(name: str, model: str) -> Dict[str, Any]:
         return _build_synthetic_shape("W2", model, W2_SPEC)
     if name in EFFICIENCY_SPEC:
         return _build_efficiency(name, model)
+    if name == "W3":
+        return _build_reasoning(model)
+    if name == "W4":
+        return _build_longdoc_mix(model)
+    if name == "W5":
+        return _build_reasoning(model, "W5")
+    if name == "W6":
+        return _build_longctx(model)
+    if name == "W7":
+        return _build_midctx(model)
     raise KeyError(f"unknown workload {name}")
 
 
 def manifest_path(name: str, root: Optional[pathlib.Path] = None) -> pathlib.Path:
     root = root or _repo_root()
     return root / "data" / "manifests" / f"{name}.json"
+
+
+# Multi-phase bulk jobs for the reconfiguration study, built from frozen
+# manifests: (part, repetitions) in arrival order.  Repeated parts reuse the
+# same prompts under new request ids; prefix caching is off, so every repeat
+# costs the same prefill and decode as the first.
+COMPOSITES = {
+    "W0x4": (("W0", 4),),
+    "MIX_W4_W0x4": (("W4", 1), ("W0", 4)),
+    "MIX_W4_W5": (("W4", 1), ("W5", 1)),
+    "MIX_W6_W0": (("W6", 1), ("W0", 1)),
+    "W6x2": (("W6", 2),),
+    "W6x4": (("W6", 4),),
+}
+
+
+def _manifest_body(requests: List[Dict[str, Any]]) -> str:
+    return json.dumps([[r["request_id"], r["prompt_token_ids"], r["max_tokens"]] for r in requests],
+                      separators=(",", ":"))
+
+
+def _expand_composite(name: str, parts: Sequence[Sequence[Any]],
+                      root: Optional[pathlib.Path]) -> Dict[str, Any]:
+    requests: List[Dict[str, Any]] = []
+    sources = []
+    for index, (part, repeats) in enumerate(parts):
+        base = load_manifest(part, root)
+        sources.append({"part": part, "repeats": repeats, "manifest_sha256": base["manifest_sha256"]})
+        for repeat in range(repeats):
+            for row in base["requests"]:
+                requests.append({**row, "request_id": f"{name}-p{index}r{repeat}-{row['request_id']}",
+                                 "arrival_index": len(requests), "phase": index, "phase_workload": part,
+                                 "repeat": repeat})
+    contexts = sorted(r["prompt_tokens"] + r["max_tokens"] for r in requests)
+    first = load_manifest(parts[0][0], root)
+    return {"workload": name, "model": first["model"], "catalogue": first["catalogue"],
+            "catalogue_sha256": first["catalogue_sha256"], "requests": requests,
+            "num_requests": len(requests),
+            "useful_output_tokens": sum(r["max_tokens"] for r in requests),
+            "prompt_tokens_total": sum(r["prompt_tokens"] for r in requests),
+            "context_p50": contexts[len(contexts) // 2], "context_max": contexts[-1],
+            "manifest_sha256": hashlib.sha256(_manifest_body(requests).encode()).hexdigest(),
+            "composite": [list(p) for p in parts], "provenance": {"parts": sources}}
+
+
+def write_composite(name: str, root: Optional[pathlib.Path] = None) -> Dict[str, Any]:
+    """Freezes a small descriptor; requests are expanded from the parts on load."""
+    full = _expand_composite(name, COMPOSITES[name], root)
+    descriptor = {k: v for k, v in full.items() if k != "requests"}
+    manifest_path(name, root).write_text(json.dumps(descriptor, indent=1))
+    return descriptor
 
 
 def load_manifest(name: str, root: Optional[pathlib.Path] = None) -> Dict[str, Any]:
@@ -335,14 +595,12 @@ def load_manifest(name: str, root: Optional[pathlib.Path] = None) -> Dict[str, A
             f"workload manifest {name} is not frozen at {path}; run `build-manifest` first"
         )
     manifest = json.loads(path.read_text())
-    body = json.dumps(
-        [
-            [r["request_id"], r["prompt_token_ids"], r["max_tokens"]]
-            for r in manifest["requests"]
-        ],
-        separators=(",", ":"),
-    )
-    digest = hashlib.sha256(body.encode()).hexdigest()
+    if "composite" in manifest:
+        expanded = _expand_composite(name, manifest["composite"], root)
+        if expanded["manifest_sha256"] != manifest["manifest_sha256"]:
+            raise ValueError(f"composite manifest {name} no longer matches its frozen parts")
+        return expanded
+    digest = hashlib.sha256(_manifest_body(manifest["requests"]).encode()).hexdigest()
     if digest != manifest["manifest_sha256"]:
         raise ValueError(f"manifest {name} failed its own hash check")
     return manifest
