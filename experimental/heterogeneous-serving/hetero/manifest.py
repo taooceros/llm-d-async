@@ -43,6 +43,8 @@ CATALOGUE_WINDOWS = {
     "W3": (0, 4000),
     "W4": (0, 12000),
     "W5": (0, 1460),
+    "W6": (0, 63),
+    "W7": (0, 240),  # all 240 midctx catalogue records
 }
 
 # Long-decode offline reasoning backlog: every request decodes for the length
@@ -67,6 +69,19 @@ W4_SPEC = {"short_requests": 880, "long_requests": 24, "long_catalogue": "longdo
 # translation's length (median prompt ~3.5k, decode ~4k tokens).
 W5_SPEC = {"requests": 250, "catalogue": "translation", "seed": 20260930,
            "max_context_tokens": 16384}
+
+# Long-context bulk backlog: real GovReport reports whose prompt exceeds a bf16
+# TP8 KV pool (52,864 tokens); only a TP16 engine with max_model_len 131072 can
+# serve them.  Decode length is the real summary's length; run with ignore_eos.
+W6_SPEC = {"requests": 40, "catalogue": "longctx", "seed": 20261006,
+           "min_prompt_tokens": 52865, "max_context_tokens": 131072}
+
+# Mid-length band: real GovReport reports with 16,384-49,152-token prompts;
+# fits both a bf16 TP8 pool (52.9k; S deployed at max_model_len 51,200) and a
+# TP16.  Decode length is the real summary's length; run with ignore_eos.
+W7_SPEC = {"requests": 120, "catalogue": "midctx", "seed": 20261007,
+           "min_prompt_tokens": 16384, "max_prompt_tokens": 49152,
+           "max_context_tokens": 51200}
 
 W1_SPEC = {
     "requests": 320,
@@ -399,6 +414,72 @@ def _build_longdoc_mix(model: str) -> Dict[str, Any]:
     })
 
 
+def _build_longctx(model: str) -> Dict[str, Any]:
+    spec = W6_SPEC
+    tokenised = _tokenise_catalogue(model, spec["catalogue"])
+    catalogue = load_catalogue(spec["catalogue"])
+    eligible = []
+    for row in tokenised["rows"]:
+        decode = int(catalogue["records"][row["index"]]["reference_decode_tokens"])
+        if row["num_tokens"] < spec["min_prompt_tokens"] or \
+                row["num_tokens"] + decode > spec["max_context_tokens"]:
+            continue  # model tokenizer disagrees with the catalogue; never truncate
+        eligible.append((row, decode))
+    if len(eligible) < spec["requests"]:
+        raise ValueError("long-context catalogue cannot satisfy W6")
+    rng = random.Random(spec["seed"])
+    chosen = rng.sample(eligible, spec["requests"])
+    rng.shuffle(chosen)  # arrival order
+    requests = [
+        {"request_id": f"W6-{index:05d}", "arrival_index": index,
+         "prompt_token_ids": row["token_ids"], "prompt_tokens": row["num_tokens"],
+         "demanded_prompt_tokens": row["num_tokens"], "max_tokens": decode,
+         "source_id": row["id"], "request_class": "long"}
+        for index, (row, decode) in enumerate(chosen)
+    ]
+    shards = sorted({r["split"] for r in catalogue["records"]})
+    return _finalise("W6", requests, tokenised, provenance={
+        "spec": spec, "catalogue": catalogue["path"], "catalogue_sha256": catalogue["sha256"],
+        "source": "ccdv/govreport-summarization shards " + ", ".join(shards)
+                  + "; decode length is the real summary length; run with ignore_eos",
+        "eligible_after_model_tokenizer": len(eligible),
+        "intended_policy": "decode_length_blind",
+    })
+
+
+def _build_midctx(model: str) -> Dict[str, Any]:
+    spec = W7_SPEC
+    tokenised = _tokenise_catalogue(model, spec["catalogue"])
+    catalogue = load_catalogue(spec["catalogue"])
+    eligible = []
+    for row in tokenised["rows"]:
+        decode = int(catalogue["records"][row["index"]]["reference_decode_tokens"])
+        if not spec["min_prompt_tokens"] <= row["num_tokens"] <= spec["max_prompt_tokens"] or \
+                row["num_tokens"] + decode > spec["max_context_tokens"]:
+            continue  # model tokenizer disagrees with the catalogue; never truncate
+        eligible.append((row, decode))
+    if len(eligible) < spec["requests"]:
+        raise ValueError("mid-context catalogue cannot satisfy W7")
+    rng = random.Random(spec["seed"])
+    chosen = rng.sample(eligible, spec["requests"])
+    rng.shuffle(chosen)  # arrival order
+    requests = [
+        {"request_id": f"W7-{index:05d}", "arrival_index": index,
+         "prompt_token_ids": row["token_ids"], "prompt_tokens": row["num_tokens"],
+         "demanded_prompt_tokens": row["num_tokens"], "max_tokens": decode,
+         "source_id": row["id"], "request_class": "mid"}
+        for index, (row, decode) in enumerate(chosen)
+    ]
+    shards = sorted({r["split"] for r in catalogue["records"]})
+    return _finalise("W7", requests, tokenised, provenance={
+        "spec": spec, "catalogue": catalogue["path"], "catalogue_sha256": catalogue["sha256"],
+        "source": "ccdv/govreport-summarization shards " + ", ".join(shards)
+                  + "; decode length is the real summary length; run with ignore_eos",
+        "eligible_after_model_tokenizer": len(eligible),
+        "intended_policy": "decode_length_blind",
+    })
+
+
 def _finalise(
     name: str,
     requests: List[Dict[str, Any]],
@@ -444,6 +525,10 @@ def build_manifest(name: str, model: str) -> Dict[str, Any]:
         return _build_longdoc_mix(model)
     if name == "W5":
         return _build_reasoning(model, "W5")
+    if name == "W6":
+        return _build_longctx(model)
+    if name == "W7":
+        return _build_midctx(model)
     raise KeyError(f"unknown workload {name}")
 
 
@@ -460,6 +545,9 @@ COMPOSITES = {
     "W0x4": (("W0", 4),),
     "MIX_W4_W0x4": (("W4", 1), ("W0", 4)),
     "MIX_W4_W5": (("W4", 1), ("W5", 1)),
+    "MIX_W6_W0": (("W6", 1), ("W0", 1)),
+    "W6x2": (("W6", 2),),
+    "W6x4": (("W6", 4),),
 }
 
 
@@ -478,7 +566,8 @@ def _expand_composite(name: str, parts: Sequence[Sequence[Any]],
         for repeat in range(repeats):
             for row in base["requests"]:
                 requests.append({**row, "request_id": f"{name}-p{index}r{repeat}-{row['request_id']}",
-                                 "arrival_index": len(requests), "phase": index, "phase_workload": part})
+                                 "arrival_index": len(requests), "phase": index, "phase_workload": part,
+                                 "repeat": repeat})
     contexts = sorted(r["prompt_tokens"] + r["max_tokens"] for r in requests)
     first = load_manifest(parts[0][0], root)
     return {"workload": name, "model": first["model"], "catalogue": first["catalogue"],

@@ -31,7 +31,7 @@ import ray
 
 from .evidence import emit_event, emit_log
 from .manifest import load_manifest
-from .native_backend import BACKEND_REVISION, RUNTIME_REVISION
+from .native_backend import BACKEND_REVISION, RUNTIME_REVISION, effective_activation_dtype
 
 ARTIFACT_ROOT = pathlib.Path(os.environ.get("OMP_HETERO_ARTIFACTS", "/tmp/omp_hetero/artifacts"))
 
@@ -121,6 +121,25 @@ def _extproc_record(item: Dict[str, Any], response: Any) -> Dict[str, Any]:
         ],
         "initial_instance": body["omp"]["initial_instance"],
         "response": body,
+    }
+
+
+FAILURE_BODY_BYTES = 1024
+FAILURE_SIGNATURE_KEYS = ("http_status", "response_protocol", "response_headers", "response_body")
+
+
+def _failure_signature(response: Any) -> Dict[str, Any]:
+    """Which hop answered a failed request, kept with the client record.
+
+    The gateway marks every completion response it produces, errors included,
+    with the protocol header; an Envoy local reply (an ExtProc stream failure,
+    the unhandled-route 503) carries no marker and no gateway detail.
+    """
+    return {
+        "http_status": response.status_code,
+        "response_protocol": response.headers.get("x-omp-gateway-protocol"),
+        "response_headers": dict(response.headers),
+        "response_body": response.content[:FAILURE_BODY_BYTES].decode("utf-8", "replace"),
     }
 
 
@@ -230,6 +249,7 @@ async def _dispatch_http(
         async def dispatch(item: Dict[str, Any]) -> Dict[str, Any]:
             async with semaphore:
                 started = time.time()
+                response = None
                 try:
                     if ingress is None:
                         response = await client.post("/v1/completions", json=item)
@@ -246,9 +266,12 @@ async def _dispatch_http(
                     record.update(client_started_at_s=started, client_finished_at_s=time.time())
                     return record
                 except Exception as exc:
-                    return {"request_id": item["request_id"],
-                            "client_started_at_s": started, "client_finished_at_s": time.time(),
-                            "error": f"{type(exc).__name__}: {exc}"}
+                    failure = {"request_id": item["request_id"],
+                               "client_started_at_s": started, "client_finished_at_s": time.time(),
+                               "error": f"{type(exc).__name__}: {exc}"}
+                    if response is not None:
+                        failure.update(_failure_signature(response))
+                    return failure
 
         tasks = [asyncio.create_task(dispatch(item)) for item in requests]
         _, pending = await asyncio.wait(tasks, timeout=timeout_s)
@@ -525,9 +548,10 @@ def _loaded_runtime(status: Dict[str, Any], qualified: Dict[str, Any]) -> Dict[s
             precision = worker.get("precision", {})
             devices = worker.get("devices", {})
             rank = host_ips.index(worker["node_ip"])
+            activation_dtype = effective_activation_dtype(settings["activation_dtype"], parameter_dtype)
             wanted_precision = {**revisions, "verified_before_cache_allocation": True,
                                 "model_dtype": parameter_dtype,
-                                "activation_dtype": settings["activation_dtype"],
+                                "activation_dtype": activation_dtype,
                                 "configured_cache_dtype": settings["kv_cache_dtype"],
                                 "runner_cache_dtype": settings["kv_cache_dtype"],
                                 "matmul_precision": settings["matmul_precision"]}
@@ -542,7 +566,7 @@ def _loaded_runtime(status: Dict[str, Any], qualified: Dict[str, Any]) -> Dict[s
                     or any(precision.get(k) != value for k, value in wanted_precision.items())):
                 raise RuntimeError(f"worker loaded backend/precision differs from qualification: {name}")
             for key, dtype in (("parameter_dtypes", parameter_dtype),
-                               ("decoder_norm_dtypes", settings["activation_dtype"]),
+                               ("decoder_norm_dtypes", activation_dtype),
                                ("attention_cache_dtypes", settings["kv_cache_dtype"])):
                 counts = precision.get(key, {})
                 if set(counts) != {dtype} or not isinstance(counts[dtype], int) or counts[dtype] <= 0:
@@ -1135,8 +1159,12 @@ def _summarise(
         "unexpected_requests": unexpected,
         "duplicate_requests": duplicates,
         "failed_requests": [
-            {"request_id": r.get("request_id"), "error": r["error"]} for r in failed
+            {"request_id": r.get("request_id"), "error": r["error"],
+             **{key: r[key] for key in FAILURE_SIGNATURE_KEYS if key in r}}
+            for r in failed
         ],
+        # Streams the gateway's ExtProc aborted (Envoy: bodiless 500, upstream "-").
+        "gateway_extproc_aborts": status.get("extproc_aborts"),
         "short_requests": short,
         "replayed_tokens": replayed,
         "transferred_bytes": sum(int(t.get("transferred_bytes", 0)) for t in committed),

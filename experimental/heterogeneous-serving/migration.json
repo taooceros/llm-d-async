@@ -561,13 +561,13 @@
     },
     {
       "path": "hetero/experiment.py",
-      "sha256": "e35908539206ad0490f5e54c77563db5f6b177b33ba26f90b969956735f839b6",
-      "bytes": 60015
+      "sha256": "167b01ef4a93a42b5d013a1b7f2af9e588314579a7dcb4e07fbc5df5232b34d5",
+      "bytes": 61330
     },
     {
       "path": "hetero/manifest.py",
-      "sha256": "496b6d8c374793a205e97ab9139d2be24cd0c3df18b3ada6cba09d01b8040d74",
-      "bytes": 22121
+      "sha256": "d479c285b44ee84b2463b399514f48ef27e2e02d4fefa9b8b4edf0dd0c6b886e",
+      "bytes": 26624
     },
     {
       "path": "hetero/mechanism_cost.py",
@@ -581,8 +581,8 @@
     },
     {
       "path": "hetero/workload.py",
-      "sha256": "95115d1c0484651db577b3455832c0fd8973e03cd14b05ce199f8d53f28098e1",
-      "bytes": 3384
+      "sha256": "b5da3eb93c67d63256b94b203c15ba0b75e9bd13d5edc7e9c2a12503ecc4a28e",
+      "bytes": 3806
     },
     {
       "path": "local/design_batch_profile.md",
@@ -610,9 +610,19 @@
       "bytes": 10900
     },
     {
+      "path": "scripts/build_longctx_catalogue.py",
+      "sha256": "2122ad59755d1f6549b257a7ef7a26f9d4c68bbded1102a331f9736b8370075d",
+      "bytes": 3102
+    },
+    {
       "path": "scripts/build_longdoc_catalogue.py",
       "sha256": "8862a0518c5672f4f48944a8d12390d165c397eb74372dec1dd47ce4f02da772",
       "bytes": 2421
+    },
+    {
+      "path": "scripts/build_midctx_catalogue.py",
+      "sha256": "68c8c93e717ce0230402996e41fe0b2501edda7ec4bc2e9b1511c0318a89fd88",
+      "bytes": 3504
     },
     {
       "path": "scripts/build_reasoning_catalogue.py",
@@ -698,6 +708,16 @@
       "path": "tests/test_preemption_reprefill_vs_suspension.py",
       "sha256": "717f541407d41d8ed77a520e827956089aad23578037d7cc1c953c17713fec19",
       "bytes": 3823
+    },
+    {
+      "path": "tests/test_w6_manifest.py",
+      "sha256": "491f5e8737e143b607dc770622f3df88c6f34cb1dc66da3ed487495fe4bbaa69",
+      "bytes": 4672
+    },
+    {
+      "path": "tests/test_w7_manifest.py",
+      "sha256": "a8bc48f9eb815ff668d33517517136a2f96737c00298cdcf11988cde553799b5",
+      "bytes": 5972
     }
   ]
 }
