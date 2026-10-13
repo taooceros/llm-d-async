@@ -55,6 +55,8 @@ ARMS: Dict[str, Dict[str, Any]] = {
     "M0": {"layout": "M", "migration_enabled": False, "migration_mechanism": "recompute"},
     "MR": {"layout": "M", "migration_enabled": True, "migration_mechanism": "recompute"},
     "MK-H": {"layout": "M", "migration_enabled": True, "migration_mechanism": "kv_host"},
+    # Mb = M with its TP16 instance named large_b (staged S -> Mb -> H transitions).
+    "Mb0": {"layout": "Mb", "migration_enabled": False, "migration_mechanism": "recompute"},
 }
 
 # Admitted-population cap: the external feeder never has more than this many
