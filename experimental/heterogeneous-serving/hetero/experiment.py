@@ -59,6 +59,13 @@ ARMS: Dict[str, Dict[str, Any]] = {
     "Mb0": {"layout": "Mb", "migration_enabled": False, "migration_mechanism": "recompute"},
 }
 
+# Unfrozen-pilot-only arms. Kept out of ARMS so frozen protocols (which pin
+# ARMS verbatim) stay valid. T32: one TP32 engine over the whole slice,
+# deployed from deploy/layouts/T32.json.
+PILOT_ARMS: Dict[str, Dict[str, Any]] = {
+    "T32": {"layout": "T32", "migration_enabled": False, "migration_mechanism": "recompute"},
+}
+
 # Admitted-population cap: the external feeder never has more than this many
 # unfinished requests at the gateway.  Frozen across arms.
 ADMITTED_CAP = 256
@@ -629,9 +636,10 @@ def run_arm(
     def runtime(observed: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None if pilot else _loaded_runtime(observed, cohort["qualified_runtime"])
 
-    if arm not in ARMS:
-        raise KeyError(f"unknown arm {arm}; known: {sorted(ARMS)}")
-    spec = ARMS[arm]
+    arms = {**ARMS, **PILOT_ARMS} if pilot else ARMS
+    if arm not in arms:
+        raise KeyError(f"unknown arm {arm}; known: {sorted(arms)}")
+    spec = arms[arm]
     if epp_config is not None and spec["migration_enabled"]:
         raise ValueError(f"arm {arm} migrates; the EPP cannot retarget a routed request")
     epp = _epp_arm_config(epp_config) if epp_config is not None else None

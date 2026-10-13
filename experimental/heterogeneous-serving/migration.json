@@ -561,8 +561,8 @@
     },
     {
       "path": "hetero/experiment.py",
-      "sha256": "167b01ef4a93a42b5d013a1b7f2af9e588314579a7dcb4e07fbc5df5232b34d5",
-      "bytes": 61330
+      "sha256": "cf471e84d12b2b64b140320506b89d75f91b5ff3b8b9d9915e54d7c13872664f",
+      "bytes": 61711
     },
     {
       "path": "hetero/manifest.py",
@@ -610,6 +610,11 @@
       "bytes": 10900
     },
     {
+      "path": "scripts/bf16_rate_table.py",
+      "sha256": "149221392014c8a3e730f56a248bd99664e4ebcfa86b2b68a60094b32328b17e",
+      "bytes": 4613
+    },
+    {
       "path": "scripts/build_longctx_catalogue.py",
       "sha256": "2122ad59755d1f6549b257a7ef7a26f9d4c68bbded1102a331f9736b8370075d",
       "bytes": 3102
@@ -633,6 +638,16 @@
       "path": "scripts/build_translation_catalogue.py",
       "sha256": "e14c7fff41397da96a3b8d480a008e7cc47cecceba038d7c8a089f393aea1b14",
       "bytes": 2759
+    },
+    {
+      "path": "scripts/bulk_cost_model.py",
+      "sha256": "cef116c00c4c1c80362423a4812b996393b22d0757b76e1bc42091e982213f4c",
+      "bytes": 38723
+    },
+    {
+      "path": "scripts/long_rate_table.py",
+      "sha256": "dec49f8a1471a354b38edb876e911fde1e9747e7c62cc296a26ff1f1d44d5d6b",
+      "bytes": 18702
     },
     {
       "path": "scripts/optimize_batch_size_policy.py",
@@ -700,9 +715,19 @@
       "bytes": 9314
     },
     {
+      "path": "tests/test_long_job_model.py",
+      "sha256": "726061e4b8a91c2708ff02505e6ddcdcf0340dd2367b7696f3effb8460cd4d56",
+      "bytes": 9624
+    },
+    {
       "path": "tests/test_mechanism_cost.py",
       "sha256": "29effe9617456966e49556650cc99c9196ac27d6d1a02c7ad7ed06743d1024fd",
       "bytes": 14116
+    },
+    {
+      "path": "tests/test_mid_job_model.py",
+      "sha256": "a11147329601c430016ffb86369bbf2bd708332359d5e7452a5a672d594d2557",
+      "bytes": 7715
     },
     {
       "path": "tests/test_preemption_reprefill_vs_suspension.py",
