@@ -446,10 +446,10 @@ def _metrics(transfer: Dict[str, Any], before: Dict[str, Any], after: Dict[str, 
         "native_quiesce_s": transfer["snapshot"]["quiesce_s"],
         "native_prepare_s": prepared["prepare_s"],
         "native_export": native_evidence.get("export"), "native_import_workers": native_evidence.get("import", []),
-        "transport_observability": "export_s includes queue drain, device gather and host assembly; prepare RPC also includes nested Ray object transfer; per-worker scatter_s is real import. Separate D2H/assembly/network and remote CPU are not exposed; no residual is labeled transfer cost.",
+        "transport_observability": "export_s spans every chunk: paused_s is source-engine drain plus device gather, d2h_s the slowest background host copy. Per destination worker, fetch_s is background object-store transfer, stage_s adds host head repeat and upload, scatter_s the paused device write; paused_s sums destination drains plus scatters over pauses. Remote CPU is not exposed; no residual is labeled transfer cost.",
         "logical_payload_bytes": prepared["transferred_bytes"],
         "total_wire_traffic_bytes": None, "source_worker_export_bytes": None,
-        "byte_scope": "logical exported host-array payload nbytes, not aggregate network traffic. Source collective export and destination collective import can replicate payloads across workers. Native import receipts retain observed per-worker array-write bytes and head conversions; source worker byte breakdown and total wire traffic are not exposed. Full wall cost remains charged.",
+        "byte_scope": "logical exported canonical payload nbytes (one replica per original head), not aggregate network traffic. Each destination worker fetches only pieces its devices hold; import receipts retain per-worker fetched_bytes, uploaded array bytes and head conversions. Total wire traffic is not exposed. Full wall cost remains charged.",
         "cache_coverage": transfer["cache_coverage"],
         "actual_native_replayed_positions": replayed, "expected_computed_frontier_replay": expected_replay,
         "replay_excludes_uncomputed_tail": replayed == expected_replay == prepared["rebuild_tokens"],
@@ -568,12 +568,15 @@ def _pair(trials: list[Dict[str, Any]]) -> Dict[str, Any]:
 def run_mechanism_cost(protocol_path: str = PROTOCOL_PATH, *, qualification_report_path: Optional[str] = None,
                        evaluation_protocol_path: Optional[str] = None,
                        manifest_root: Optional[str] = None, artifact_root: Optional[str] = None,
-                       catalogue_name: str = "large", timeout_s: float = 900.0) -> Dict[str, Any]:
+                       catalogue_name: str = "large", timeout_s: float = 900.0,
+                       unfrozen_diagnostic: bool = False) -> Dict[str, Any]:
     """Run all 18 trials only inside Main's already initialized RCM/Ray job.
 
     A returned report is not a pass: inspect passed_flags and cleanup.unresolved.
     The required qualification report must cover these still-resident engine
     generations. No runtime is started here and no failed trial is discarded.
+    unfrozen_diagnostic skips only the evaluation-cohort binding, for matched
+    A/B comparisons of transport builds; its report is never headline evidence.
     """
     root = pathlib.Path(artifact_root or os.environ.get("OMP_HETERO_ARTIFACTS", "/tmp/omp_hetero/artifacts"))
     directory = root / f"mechanism-cost-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}-{uuid.uuid4().hex[:8]}"
@@ -603,8 +606,13 @@ def run_mechanism_cost(protocol_path: str = PROTOCOL_PATH, *, qualification_repo
                         "mechanism": mechanism, "status": "not_started", "passed": False})
         from .experiment import _frozen_cohort, _loaded_runtime
 
-        report["evaluation_cohort"] = _frozen_cohort(evaluation_protocol_path, "MR")
-        _frozen_cohort(evaluation_protocol_path, "MK-H")
+        if unfrozen_diagnostic:
+            report["evidence_scope"] = ("UNFROZEN transport A/B diagnostic: no evaluation cohort; "
+                                        "never headline or cohort evidence. " + report["evidence_scope"])
+            report["evaluation_cohort"] = {"status": "unfrozen_diagnostic"}
+        else:
+            report["evaluation_cohort"] = _frozen_cohort(evaluation_protocol_path, "MR")
+            _frozen_cohort(evaluation_protocol_path, "MK-H")
         from .gateway.lifecycle import find_gateway
         gateway = find_gateway()
         if gateway is None:
@@ -612,9 +620,10 @@ def run_mechanism_cost(protocol_path: str = PROTOCOL_PATH, *, qualification_repo
         status = ray.get(gateway.status.remote(), timeout=120)
         if status["layout_id"] != "M":
             raise RuntimeError("mechanism cost requires the qualified M layout")
-        report["loaded_runtime"] = _loaded_runtime(
-            status, report["evaluation_cohort"]["qualified_runtime"]
-        )
+        if not unfrozen_diagnostic:
+            report["loaded_runtime"] = _loaded_runtime(
+                status, report["evaluation_cohort"]["qualified_runtime"]
+            )
         qualification = _qualification(qualification_report_path, directory)
         report["qualification"] = qualification
         selection = _select_prompts(protocol, fidelity, catalogue_name, pathlib.Path(manifest_root) if manifest_root else None)
