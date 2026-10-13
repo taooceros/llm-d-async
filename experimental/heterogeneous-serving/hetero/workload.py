@@ -15,6 +15,16 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence
 CATALOGUES = {
     "small": "data/workloads/sharegpt_sampled_500.json",
     "large": "data/workloads/sharegpt_large.json",
+    # Real problems with the Gemma-token length of a real DeepSeek-R1 trace;
+    # built by scripts/build_reasoning_catalogue.py.
+    "reasoning": "data/workloads/reasoning_r1.json",
+    # Real GovReport reports longer than a TP8 engine's KV pool, with the
+    # Gemma-token length of their real summaries; built by
+    # scripts/build_longdoc_catalogue.py.
+    "longdoc": "data/workloads/longdoc_govreport.json",
+    # Real TED talk transcripts with the Gemma-token length of their real
+    # published French/German translation; scripts/build_translation_catalogue.py.
+    "translation": "data/workloads/translation_ted.json",
 }
 
 
