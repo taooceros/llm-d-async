@@ -650,6 +650,51 @@
       "bytes": 2759
     },
     {
+      "path": "scripts/gpu_autoscale/fetch.py",
+      "sha256": "0203a90a3305e57dd92bf0feeff8ec5be04aa74e99de3e9ab99f9457fa0e6cb8",
+      "bytes": 4425
+    },
+    {
+      "path": "scripts/gpu_autoscale/pm_cuda.py",
+      "sha256": "104054c92821dcc19010ccda5247ebd8d02127f04379b2321dac934ad2f76c9f",
+      "bytes": 20572
+    },
+    {
+      "path": "scripts/gpu_autoscale/pm_state.py",
+      "sha256": "54e04df8249526336b555c59143bf33f7dd53284bf5596e2ee7f5f0c01b2d784",
+      "bytes": 25852
+    },
+    {
+      "path": "scripts/gpu_autoscale/pm_zygote.py",
+      "sha256": "958ce5423a42ba25a39882b1454b7f713b5aaa10e923bac2c3521db50784e58c",
+      "bytes": 6217
+    },
+    {
+      "path": "scripts/gpu_autoscale/pod_run.sh",
+      "sha256": "f575ab3b57b30236609c2c6c317d5c56b1a4fa173a99e028391a88ff0bbe7856",
+      "bytes": 27732
+    },
+    {
+      "path": "scripts/gpu_autoscale/sllm_loader.py",
+      "sha256": "8b83de1ae81c4bdee7088780190e7d5e54ef1cf5f6f8b17c0e7efc1f992174c9",
+      "bytes": 6158
+    },
+    {
+      "path": "scripts/gpu_autoscale/sllm_store_fixes.patch",
+      "sha256": "816d66e5fcd6206f915dadc02b985bb17045edcc913ac6b4e953e8e070d1f051",
+      "bytes": 3022
+    },
+    {
+      "path": "scripts/gpu_autoscale/sllm_vllm.py",
+      "sha256": "073d86466e067f8f76265869e2ab01f81b607e11288dbacaae5d49d0d91a24ea",
+      "bytes": 14354
+    },
+    {
+      "path": "scripts/gpu_autoscale/wipe.py",
+      "sha256": "cc153f5a0db12c73024930f621714ec355f6c1f3b2d1dc486213d4befbc3028b",
+      "bytes": 5576
+    },
+    {
       "path": "scripts/lld/w0-validation-prompts.json",
       "sha256": "52a95a19c1ef080ff52dfde47c0b76a15b94500bd1c7cee9040b56ac7e5dcd94",
       "bytes": 44060

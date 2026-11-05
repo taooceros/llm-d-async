@@ -1,0 +1,65 @@
+diff --git a/sllm_store/csrc/checkpoint/aligned_buffer.cpp b/sllm_store/csrc/checkpoint/aligned_buffer.cpp
+index 4b93340..21d91f1 100644
+--- a/sllm_store/csrc/checkpoint/aligned_buffer.cpp
++++ b/sllm_store/csrc/checkpoint/aligned_buffer.cpp
+@@ -64,9 +64,17 @@ size_t AlignedBuffer::writeData(const void* data, size_t size) {
+         exit(1);
+       }
+       memcpy(direct_write_buf, (char*)data + written, direct_write_size);
+-      ssize_t ret =
+-          pwrite(fd_, direct_write_buf, direct_write_size, file_offset_);
+-      if (ret < 0 || ret != direct_write_size) {
++      // pwrite moves at most 0x7ffff000 bytes per call on Linux: a tensor larger
++      // than 2 GiB written here needs several calls
++      ssize_t ret = 0;
++      size_t done = 0;
++      while (done < direct_write_size) {
++        ret = pwrite(fd_, (char*)direct_write_buf + done,
++                     direct_write_size - done, file_offset_ + done);
++        if (ret <= 0) break;
++        done += ret;
++      }
++      if (done != direct_write_size) {
+         std::cerr << "Failed to write to file, ret: " << ret
+                   << " errno: " << errno << std::endl;
+         return written;
+diff --git a/sllm_store/sllm_store/utils.py b/sllm_store/sllm_store/utils.py
+index be1edf2..c5969f0 100644
+--- a/sllm_store/sllm_store/utils.py
++++ b/sllm_store/sllm_store/utils.py
+@@ -69,6 +69,17 @@ def send_module_buffers_to_device(
+                     set_module_buffer_to_device(module, buffer_name, device_id)
+ 
+ 
++# Every tensor starts on a 256-byte boundary of the device allocation, as with cudaMalloc and PyTorch's caching
++# allocator. Packing the records back to back left half of Gemma-4's tensors only 8-byte aligned, and kernels
++# that assume 16-byte alignment (Inductor's, cuBLAS's) then take slow paths: CUDA graph capture 24 s instead
++# of 8 s and 1.2 GiB more graph memory (vLLM 0.23, H100, 2026-10-29).
++DEVICE_ALIGNMENT = 256
++
++
++def _aligned(size):
++    return (size + DEVICE_ALIGNMENT - 1) // DEVICE_ALIGNMENT * DEVICE_ALIGNMENT
++
++
+ def calculate_device_memory(device_map, tensor_index):
+     device_memory = {}
+     tensor_record = {}
+@@ -80,7 +91,7 @@ def calculate_device_memory(device_map, tensor_index):
+             if (offset, size) in tensor_record:
+                 continue  # Skip duplicate tensors
+             tensor_record[(offset, size)] = True
+-            device_memory[device] += tensor_index[tensor_name][1]
++            device_memory[device] += _aligned(tensor_index[tensor_name][1])
+         else:
+             raise ValueError(f"Tensor {tensor_name} not found in tensor_index.")
+ 
+@@ -111,7 +122,7 @@ def calculate_tensor_device_offsets(device_map, tensor_index):
+                 tensor_copy_chunks[device].append(
+                     (offset, size, device_offset[device], 0)
+                 )
+-                device_offset[device] += size
++                device_offset[device] += _aligned(size)
+         else:
+             raise ValueError(f"Tensor {tensor_name} not found in tensor_index.")
+ 
