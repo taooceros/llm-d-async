@@ -705,6 +705,16 @@
       "bytes": 5276
     },
     {
+      "path": "scripts/torchtpu_fuse_bench.py",
+      "sha256": "cb23363b4054b4ebfe1745281bba81282bf2dbfaf42b2eae827f745cab16e23e",
+      "bytes": 6903
+    },
+    {
+      "path": "scripts/torchtpu_h2d_bench.py",
+      "sha256": "703809840336ec06be8488bc74c349b7ee11b98ba5807b216fefc8bb3ce396e9",
+      "bytes": 1977
+    },
+    {
       "path": "tests/test_admission_control.py",
       "sha256": "d4295402f625fe59ab35ff8f038f0864e5057936f9c886da57d7b87c51f0b4b8",
       "bytes": 54216
