@@ -625,6 +625,61 @@
       "bytes": 11320
     },
     {
+      "path": "scripts/autoscale_cost/analyze.py",
+      "sha256": "246f36b873a1767a379389827ada3c5d8909bea7e6e4ecada0d8d5ac4a3a348b",
+      "bytes": 20758
+    },
+    {
+      "path": "scripts/autoscale_cost/calibrate.py",
+      "sha256": "7101acd57061c69bf757730535d742f3e0d4a4a3abafcc236066c657de59311b",
+      "bytes": 7728
+    },
+    {
+      "path": "scripts/autoscale_cost/capacity.py",
+      "sha256": "dd2baa3485eed76372c7bd8039f17fad2ba3680efa161642e083ef7f3c7d24fc",
+      "bytes": 2412
+    },
+    {
+      "path": "scripts/autoscale_cost/common.py",
+      "sha256": "b5f3a4b4245a8edc05ca23704921ac0a2093c38cfb6f686800d6f09548709aee",
+      "bytes": 2697
+    },
+    {
+      "path": "scripts/autoscale_cost/comparator.py",
+      "sha256": "043ac952a9dc4a3eec4a820257feb6d2d2566d381d8a8d61906d4edb1dc999e3",
+      "bytes": 8875
+    },
+    {
+      "path": "scripts/autoscale_cost/data.py",
+      "sha256": "8da600738fb3d7398ac97ff89b77755f5f65d2680b3ced3f9693d4a5671392d7",
+      "bytes": 3898
+    },
+    {
+      "path": "scripts/autoscale_cost/extract_model.py",
+      "sha256": "6af31a8487f7ce1dc32ede5fae2e987ac5de7c882267e77d2d577472e08131d1",
+      "bytes": 3223
+    },
+    {
+      "path": "scripts/autoscale_cost/report.py",
+      "sha256": "5700bfbfa01030f9950dbb5c845e5da3e0ab7460b03f4fc54eeb70398c8566fc",
+      "bytes": 9982
+    },
+    {
+      "path": "scripts/autoscale_cost/simcore.py",
+      "sha256": "2b1dd7cc04f550caa903a5d7a2823ab988f9b80241532d4d0d18aa2c8a1eeb9a",
+      "bytes": 28517
+    },
+    {
+      "path": "scripts/autoscale_cost/sweep.py",
+      "sha256": "b616ec3efa2c0ed172482e884b4ac65b8267cfdbbb5717abc687e0b406b63d99",
+      "bytes": 9567
+    },
+    {
+      "path": "scripts/autoscale_cost/validate.py",
+      "sha256": "2d7bf0f0c9db60fdd9ae9b02fdfb12f7030e7b50c8fa152b18d2ed2899a303df",
+      "bytes": 9756
+    },
+    {
       "path": "scripts/build_longctx_catalogue.py",
       "sha256": "2122ad59755d1f6549b257a7ef7a26f9d4c68bbded1102a331f9736b8370075d",
       "bytes": 3102
