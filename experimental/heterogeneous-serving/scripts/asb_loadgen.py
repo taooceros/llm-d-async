@@ -695,7 +695,7 @@ async def one_request(session, url, model, run_id, seed, i, n_in, n_out, sched_t
             h = r.headers
             q = _fhdr(h, "x-asb-queue-ms")
             rec["queue_s"] = q / 1000.0 if q is not None else None
-            rec["instance"] = h.get("x-asb-instance") or None
+            rec["instance"] = h.get("x-asb-instance") or h.get("x-lld-upstream") or None
             a = _fhdr(h, "x-asb-attempts")
             rec["attempts"] = int(a) if a is not None else None
             rec["arrived_at"] = _fhdr(h, "x-asb-arrived-at")
@@ -717,6 +717,12 @@ async def one_request(session, url, model, run_id, seed, i, n_in, n_out, sched_t
             rec["engine_started_at_s"] = o.get("started_at_s")
             rec["engine_finished_at_s"] = o.get("finished_at_s")
             rec["engine_elapsed_s"] = o.get("elapsed_s")
+            if rec["instance"] is None:  # behind the llm-d EPP/Envoy (no x-asb-* headers)
+                rec["instance"] = o.get("instance_id")
+            if rec["queue_s"] is None and rec["engine_started_at_s"] is not None:
+                # gateway queue + proxy + network = engine arrival - send (in-cluster clocks, NTP-synced)
+                rec["queue_s"] = max(0.0, rec["engine_started_at_s"] - send_at)
+                rec["queue_src"] = "clock"
             if rec["queue_s"] is not None and rec["engine_ttft_s"] is not None:
                 rec["ttft_s"] = rec["queue_s"] + rec["engine_ttft_s"]
             ot = rec["output_tokens"]
