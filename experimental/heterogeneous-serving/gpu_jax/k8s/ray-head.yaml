@@ -1,0 +1,20 @@
+# Ray head for the gpu-jax experiment: CPU only, on default-pool. GPU pods join it as workers and
+# the engine runs as a Ray job (working_dir = gpu_jax/), as on the TPU cluster.
+apiVersion: v1
+kind: Pod
+metadata: {name: ray-head, namespace: gpu-jax, labels: {app: gpu-jax, role: ray-head}}
+spec:
+  nodeSelector: {cloud.google.com/gke-nodepool: default-pool}
+  containers:
+  - name: ray
+    image: asia-southeast1-docker.pkg.dev/sysres-disagg-ml/gpu-jax/vllm-jax-cuda:0.32.0-jax0.11.2-cu13@sha256:913c3f4093f09c3529df5408c4915bce54fc54864971a28abc839cc988bebf4e
+    command: [ray, start, --head, --port=6379, --dashboard-host=0.0.0.0, --num-cpus=0, --disable-usage-stats, --block]
+    resources: {requests: {cpu: "1", memory: 4Gi}}
+    ports: [{containerPort: 6379}, {containerPort: 8265}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: ray-head, namespace: gpu-jax}
+spec:
+  selector: {role: ray-head}
+  ports: [{name: gcs, port: 6379}, {name: dashboard, port: 8265}]

@@ -1,0 +1,24 @@
+# Long-lived development GPU worker (not a timed run): joins the Ray head with resource
+# {"pod_gpu-dev": 1} so jobs can target it.
+apiVersion: v1
+kind: Pod
+metadata: {name: gpu-dev, namespace: gpu-jax, labels: {app: gpu-jax, role: gpu-dev}}
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 5
+  nodeSelector: {cloud.google.com/gke-nodepool: gpu-pool-spot}
+  tolerations: [{key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}]
+  containers:
+  - name: worker
+    image: asia-southeast1-docker.pkg.dev/sysres-disagg-ml/gpu-jax/vllm-jax-cuda:0.32.0-jax0.11.2-cu13@sha256:913c3f4093f09c3529df5408c4915bce54fc54864971a28abc839cc988bebf4e
+    command: [bash, -c, 'ray start --address=ray-head:6379 --num-gpus=1 --object-store-memory=2000000000 --resources="{\"pod_gpu-dev\": 1}" --disable-usage-stats --block']
+    # GKE mounts the driver at /usr/local/nvidia but the python base image has no loader entry for it
+    env: [{name: HOME, value: /cache/home}, {name: LD_LIBRARY_PATH, value: /usr/local/nvidia/lib64},
+          {name: PATH, value: '/opt/venv/bin:/usr/local/nvidia/bin:/usr/local/bin:/usr/bin:/bin'}]
+    securityContext: {privileged: true}
+    resources: {limits: {nvidia.com/gpu: 1}}
+    volumeMounts: [{name: cache, mountPath: /cache}, {name: dshm, mountPath: /dev/shm}, {name: model, mountPath: /model}]
+  volumes:
+  - {name: cache, emptyDir: {}}
+  - {name: dshm, emptyDir: {medium: Memory, sizeLimit: 16Gi}}
+  - {name: model, emptyDir: {medium: Memory, sizeLimit: 64Gi}}

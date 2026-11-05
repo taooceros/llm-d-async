@@ -560,6 +560,91 @@
       "bytes": 9930
     },
     {
+      "path": "gpu_jax/hetero_jax_gpu/__init__.py",
+      "sha256": "3fd4ff0bddf3470ad720199b12619e8a65a94b39e939090d5d8ac23eca62709e",
+      "bytes": 2400
+    },
+    {
+      "path": "gpu_jax/hetero_jax_gpu/envcheck.py",
+      "sha256": "ca7a2175f1f54d2d65e313862a93b4d5972ebcf3f1e168be395f5469eaccdf77",
+      "bytes": 3247
+    },
+    {
+      "path": "gpu_jax/hetero_jax_gpu/patches.py",
+      "sha256": "22371c2e75aed517292779638930ba01137a06efaecaa9e59a16ce54b034361c",
+      "bytes": 9938
+    },
+    {
+      "path": "gpu_jax/hetero_jax_gpu/pm.py",
+      "sha256": "197aacba4d4a782eade99347bb03019025a194b12b2f8fa86a496f29ed0e93fd",
+      "bytes": 17928
+    },
+    {
+      "path": "gpu_jax/hetero_jax_gpu/rpa_triton.py",
+      "sha256": "25040bf814e8677f7632b11973f8b98bc57958c7ed80d98e436307610d823218",
+      "bytes": 13266
+    },
+    {
+      "path": "gpu_jax/hetero_jax_gpu/run_arm.sh",
+      "sha256": "465a917f4b8a9940b0d937cb6eeeae68abede5fc3c04ab0959bd9128ec0d1b6f",
+      "bytes": 8554
+    },
+    {
+      "path": "gpu_jax/hetero_jax_gpu/serve.py",
+      "sha256": "db80991d260cac4e7b3dff40d987c0fb3701e371bf0d9ae9bf2b31a0daad2e04",
+      "bytes": 4407
+    },
+    {
+      "path": "gpu_jax/image/IMAGE",
+      "sha256": "9263edb579fcc1053ca5be92ef92f64bb294a359b7715c4cdbf9f69cfca6f7a7",
+      "bytes": 164
+    },
+    {
+      "path": "gpu_jax/image/build_image.sh",
+      "sha256": "e311bbde52bfc418fdcb7cc12fd7411351e91dadcd23f989e48a72617b293229",
+      "bytes": 2224
+    },
+    {
+      "path": "gpu_jax/image/requirements.in",
+      "sha256": "98ef39e28a306d17a9401999c06ae32abb2ac1d5e9f0fea25c784153aa806c53",
+      "bytes": 390
+    },
+    {
+      "path": "gpu_jax/image/requirements.lock",
+      "sha256": "350aa227644049305381cb13f7ecbcb88ec378aeebc8ed36b271aa7682b27011",
+      "bytes": 19495
+    },
+    {
+      "path": "gpu_jax/k8s/gpu-dev.yaml",
+      "sha256": "24f2ab6df6d60e66628c92be5dcfe79b6d450bb459bf642ce40bf97c49bd9ce8",
+      "bytes": 1501
+    },
+    {
+      "path": "gpu_jax/k8s/ray-head.yaml",
+      "sha256": "f3228ce5e17112b948655fc489dcd45764ef9447483d671b54fc688aee0780c5",
+      "bytes": 970
+    },
+    {
+      "path": "gpu_jax/sitecustomize.py",
+      "sha256": "c6f601beef9af30c2acab7cb5ed9e4c76aefe451a6b2461b3da9c82eef0b95b9",
+      "bytes": 334
+    },
+    {
+      "path": "gpu_jax/tests/cache_key_probe.py",
+      "sha256": "a101cfc68ad9330414d8c8de7ee302aa65215d1e9ce8cb447a0369eb7ed5bf1c",
+      "bytes": 1333
+    },
+    {
+      "path": "gpu_jax/tests/rpa_error_report.py",
+      "sha256": "3be3031801b456f050a26a516a269b1efc0b73e983dafdbc663d5105c2725235",
+      "bytes": 1285
+    },
+    {
+      "path": "gpu_jax/tests/test_rpa_triton.py",
+      "sha256": "875a05b140fc86c06f10d758ab1a6d4d2c040189672f75d85aca46e9e050a7dc",
+      "bytes": 6641
+    },
+    {
       "path": "hetero/experiment.py",
       "sha256": "167b01ef4a93a42b5d013a1b7f2af9e588314579a7dcb4e07fbc5df5232b34d5",
       "bytes": 61330
@@ -648,6 +733,31 @@
       "path": "scripts/build_translation_catalogue.py",
       "sha256": "e14c7fff41397da96a3b8d480a008e7cc47cecceba038d7c8a089f393aea1b14",
       "bytes": 2759
+    },
+    {
+      "path": "scripts/gpu_autoscale/fetch.py",
+      "sha256": "8046fb0360a59b20d888ad3e7ed05bff708de32a54e326da4cf500812f30f476",
+      "bytes": 3860
+    },
+    {
+      "path": "scripts/gpu_autoscale/pm_state.py",
+      "sha256": "e3c3c9b66b1328b7a2f68e27e6d07fee884e45983da32d590cd3ad2a1ace3074",
+      "bytes": 16316
+    },
+    {
+      "path": "scripts/gpu_autoscale/pod_run.sh",
+      "sha256": "137e502db61cb100d73efbdfbb5f1930d649aa750e0ad58091e02bea51c7ec34",
+      "bytes": 2906
+    },
+    {
+      "path": "scripts/gpu_autoscale/pod_run_jax.sh",
+      "sha256": "b12a461bce5052d16cbc3c06427e800c185c69d436e6fd8204717793aca54324",
+      "bytes": 1789
+    },
+    {
+      "path": "scripts/gpu_autoscale/wipe.py",
+      "sha256": "035b7d68875dfc8699778a93471961fe5f37e5feb5dfa8e5d525d9bd5c2c1ed1",
+      "bytes": 5269
     },
     {
       "path": "scripts/lld/w0-validation-prompts.json",
