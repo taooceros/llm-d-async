@@ -625,6 +625,106 @@
       "bytes": 11320
     },
     {
+      "path": "scripts/autoscale_theory/check_accounting.py",
+      "sha256": "f6dc142c68e95613d79b5bf899e1c75e442b0190378cee603d40d88777574ae7",
+      "bytes": 2924
+    },
+    {
+      "path": "scripts/autoscale_theory/figures.py",
+      "sha256": "2e51dcad161f993d9a428284f9455805b47abb21f91e481ef1dd6a125905e58b",
+      "bytes": 10597
+    },
+    {
+      "path": "scripts/autoscale_theory/headroom.py",
+      "sha256": "2fc07bd3f6994fed126116111f8a270b869dad76acd1d8ce81d48c3a8cceb850",
+      "bytes": 5347
+    },
+    {
+      "path": "scripts/autoscale_theory/headroom_results.json",
+      "sha256": "378f83eb8b34604091755577a8e76baf1f525e011dd24cdf701c7796d6dc54ab",
+      "bytes": 5328
+    },
+    {
+      "path": "scripts/autoscale_theory/multi_trace.py",
+      "sha256": "73c41dbc964933a574bfed3668686f8452c3a1763a21588f82752deece2f54f8",
+      "bytes": 7358
+    },
+    {
+      "path": "scripts/autoscale_theory/multi_trace_results.json",
+      "sha256": "5a293004d6651003408b4097dab7e5e62d5083e5a09c6564d116c50561f10a0a",
+      "bytes": 6806
+    },
+    {
+      "path": "scripts/autoscale_theory/online.py",
+      "sha256": "b51207bac75b988f70cba09fa3363681e227d51d7e1ab658e31f7ed665319865",
+      "bytes": 4619
+    },
+    {
+      "path": "scripts/autoscale_theory/online_frontier.json",
+      "sha256": "25103acf2e9ebfa8e230f375050f6e5072ab4444b0b9528f520fbf3c68bb7528",
+      "bytes": 5158
+    },
+    {
+      "path": "scripts/autoscale_theory/online_frontier.py",
+      "sha256": "024a739bd287b42eef78c335f107b958b85e627e2be171f6e4fd7d55e8300d96",
+      "bytes": 4033
+    },
+    {
+      "path": "scripts/autoscale_theory/online_results.json",
+      "sha256": "79bbe65d59b5bc5500afa071ddc27f1daa2c05542a1d6ba8dcf12c62b2f45d4e",
+      "bytes": 14092
+    },
+    {
+      "path": "scripts/autoscale_theory/replay.py",
+      "sha256": "2d7d2692f1f1913ed6aaecf8bec0a4bdc79a565b043f84deed8ebe03e7e7c749",
+      "bytes": 41712
+    },
+    {
+      "path": "scripts/autoscale_theory/summarize.py",
+      "sha256": "564bc53c3390f929fe2a9d8273c836992f5f8c2b59b6f8d1e39f1639d184a9f1",
+      "bytes": 1765
+    },
+    {
+      "path": "scripts/autoscale_theory/theory.py",
+      "sha256": "e16916f9b950d43db7ec946c78c578346ba8086eccc443c05510daf672c02321",
+      "bytes": 6126
+    },
+    {
+      "path": "scripts/autoscale_theory/v2/burst/analyze.py",
+      "sha256": "a65495080bf4489e245bd492a47a590dec9d0235f3abc2133c41cf96184e1fe5",
+      "bytes": 8005
+    },
+    {
+      "path": "scripts/autoscale_theory/v2/burst/extended.py",
+      "sha256": "4a388f5279bdd8b5994c8fde5d5e805e63324874f302e327d8520735f0bcdb29",
+      "bytes": 6163
+    },
+    {
+      "path": "scripts/autoscale_theory/v2/burst/fit.py",
+      "sha256": "6d3e4ae8474daa9fccf4a885af3fd7b732ba27eaa142cfb0640d3fe0ecb4fe3a",
+      "bytes": 796
+    },
+    {
+      "path": "scripts/autoscale_theory/v2/fleet/analyze_fleet.py",
+      "sha256": "1226f8d00f46d04dbaa666c2e3ba1ab8740dbe414628238314251ca8d6fd7828",
+      "bytes": 12178
+    },
+    {
+      "path": "scripts/autoscale_theory/v2/fleet/hpa_episodes.py",
+      "sha256": "811e02c84ddaa81e147b213255266f605c1da0b87483d7bd90386126e5bf2d6a",
+      "bytes": 3125
+    },
+    {
+      "path": "scripts/autoscale_theory/v2/fleet/reconcile.py",
+      "sha256": "729842cd5ca12567cbcfa28a8ea39c6c11db6f97717c88ec1a801541be721fa3",
+      "bytes": 2039
+    },
+    {
+      "path": "scripts/autoscale_theory/why_concave.py",
+      "sha256": "4075d5cb0c771bc1ce0c38d3510b4d2a5a05d741283ba5d8897949ebba539b68",
+      "bytes": 2430
+    },
+    {
       "path": "scripts/build_longctx_catalogue.py",
       "sha256": "2122ad59755d1f6549b257a7ef7a26f9d4c68bbded1102a331f9736b8370075d",
       "bytes": 3102
