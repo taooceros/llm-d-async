@@ -610,6 +610,21 @@
       "bytes": 10900
     },
     {
+      "path": "scripts/asb_loadgen.py",
+      "sha256": "14c9b895e8174853dba95cd6496f217396b57f48c9191848fec49f6601816dfa",
+      "bytes": 38462
+    },
+    {
+      "path": "scripts/asb_stub_engine.py",
+      "sha256": "88a56741a53fbecef25b17bf3e2f564d01cb9402a83157559ec0c4b4660a0451",
+      "bytes": 4887
+    },
+    {
+      "path": "scripts/asb_trace.py",
+      "sha256": "30208f1315ce5b64a211cb8ab56543adba3097189388163d0bba8b5a0a6e82bf",
+      "bytes": 11320
+    },
+    {
       "path": "scripts/build_longctx_catalogue.py",
       "sha256": "2122ad59755d1f6549b257a7ef7a26f9d4c68bbded1102a331f9736b8370075d",
       "bytes": 3102
@@ -633,6 +648,11 @@
       "path": "scripts/build_translation_catalogue.py",
       "sha256": "e14c7fff41397da96a3b8d480a008e7cc47cecceba038d7c8a089f393aea1b14",
       "bytes": 2759
+    },
+    {
+      "path": "scripts/lld/w0-validation-prompts.json",
+      "sha256": "52a95a19c1ef080ff52dfde47c0b76a15b94500bd1c7cee9040b56ac7e5dcd94",
+      "bytes": 44060
     },
     {
       "path": "scripts/optimize_batch_size_policy.py",
@@ -673,6 +693,11 @@
       "path": "scripts/submit_policy_rcm.py",
       "sha256": "78392dc3ed8e18e2e9475b308dd81e4f57e5a4e3871c9c102f83878ef7dc52c2",
       "bytes": 460
+    },
+    {
+      "path": "scripts/test_asb_loadgen.py",
+      "sha256": "0ab4340f821e72b7f4642e19ee978dc19b4bc77fd3efc9f4ca3a358c22c0e927",
+      "bytes": 18432
     },
     {
       "path": "scripts/test_policy.py",
