@@ -1,0 +1,13 @@
+# vLLM TPU stack (tpu-inference, JAX) on NVIDIA H100: one locked environment.
+vllm-tpu==0.32.0
+tpu-inference==0.32.0
+jax==0.11.2
+jaxlib==0.11.2
+jax-cuda13-plugin[with-cuda]==0.11.2
+jax-cuda13-pjrt==0.11.2
+jax-triton==0.4.1
+# tpu-inference 0.32.0 pins this pre-release; listed so the resolver accepts it
+tokamax==0.0.17.dev20261015
+triton>=3.7
+ray[default,data]==2.56.1
+google-cloud-storage
